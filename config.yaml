@@ -1,0 +1,46 @@
+site_id: NDP1
+
+solver:
+  distance_limit: 150
+  residual_limit: 40
+  transponders: # list out all transponder and info
+    - lat: 44.832681360
+      lon: -125.099794900
+      height: -1832.8220
+      internal_delay: 0.200000
+      sv_mean: 1480.767
+    - lat: 44.817929650
+      lon: -125.126649450
+      height: -1829.6450
+      internal_delay: 0.320000
+      sv_mean: 1480.816
+    - lat: 44.842325200
+      lon: -125.134820280
+      height: -1830.7600
+      internal_delay: 0.440000
+      sv_mean: 1480.850
+  reference_ellipsoid:
+    semi_major_axis: 6378137.000
+    reverse_flattening: 298.257222101
+  gps_sigma_limit: 0.05
+  std_dev: true
+  geoid_undulation: -25.81
+  bisection_tolerance: 1e-10
+  array_center:
+    lat: 44.8319
+    lon: -125.1204
+  travel_times_variance: 1e-10
+  travel_times_correction: 0.0
+  transducer_delay_time: 0.0
+  harmonic_mean_start_depth: -4.0
+  input_files:
+    sound_speed:
+      path: ./data/sound_vel.txt
+    travel_times: # Glob path to two way travel time
+      path: ./data/twt.txt   
+    gps_solution:  # Glob path to wave glider position 
+      path: ./data/wg_pos.txt
+
+
+output: # Directory path to output directory
+  path: ./outputs/
