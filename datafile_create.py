@@ -113,6 +113,8 @@ def  vinc_pt(phi1, lembda1, alpha12, s) :
         return phi2, lembda2
     
     
+    
+    
 #%% Parameters that are set, change this for diff models
     # use the data that we have gotten from the fortran benchmark for transponders positions
     
@@ -136,8 +138,14 @@ trans3_x, trans3_y, trans3_z = geodetic_to_cartesian(lat = 44.842325200,
                                                      lon = -125.134820280,
                                                      alt = -1830.7600)
 
-# 
+##### temporary workaround
+trans1 = np.array([trans1_x, trans1_y, trans1_z])
+trans2 = np.array([trans2_x, trans2_y, trans2_z])
+trans3 = np.array([trans3_x, trans3_y, trans3_z])
 
+arr_center = np.array([center_x,center_y, center_z])
+
+sv = np.mean([1480.850, 1480.816, 1480.767])
 
 #%% Set up equation for the glider positions
     # will convert to a function later
@@ -147,7 +155,7 @@ trans3_x, trans3_y, trans3_z = geodetic_to_cartesian(lat = 44.842325200,
 rad = center_depth
 
 #The lower this value the higher quality the circle is with more points generated
-stepSize = 0.1
+stepSize = 0.01
 
 #Generated vertices
 positions = []
@@ -159,56 +167,74 @@ while t < 2 * math.pi:
     
 wg_pos = np.array(positions)
 
+# shift the 0,0,0 to the center of the array on the ocean surface
+# in cartesian, find the point directly above array
+wg_cen_x, wg_cen_y, wg_cen_z = geodetic_to_cartesian(44.8319, -125.1204, 0)
+
+wg_pos = wg_pos + np.array([wg_cen_x, wg_cen_y, wg_cen_z])
+
 
 #%% calculate twtt for the trasnponders
 # will not be used first as twt is off
 
-# # time(no) will be the twt of the transponders for every ping
-# obs_pts = len(wg_pos)
+# time(no) will be the twt of the transponders for every ping
+obs_pts = len(wg_pos)
 
-# time1_clean = np.zeros(obs_pts)
-# time2_clean = np.zeros(obs_pts)
-# time3_clean = np.zeros(obs_pts)
+time1_clean = np.zeros(obs_pts)
+time2_clean = np.zeros(obs_pts)
+time3_clean = np.zeros(obs_pts)
  
-# # delay is in seconds
-# delay1 = 0.2
-# delay2 = 0.32
-# delay3 = 0.44
+# delay is in seconds
+delay1 = 0.2
+delay2 = 0.32
+delay3 = 0.44
 
-# for i, wg in enumerate(wg_pos):
-#     time1_clean[i] = np.sqrt(np.inner(wg-tran_pos1, wg-tran_pos1))/sv
-#     time2_clean[i] = np.sqrt(np.inner(wg-tran_pos2, wg-tran_pos2))/sv
-#     time3_clean[i] = np.sqrt(np.inner(wg-tran_pos3, wg-tran_pos3))/sv
+for i, wg in enumerate(wg_pos):
+    time1_clean[i] = np.sqrt(np.inner(wg-trans1, wg-trans1))/sv
+    time2_clean[i] = np.sqrt(np.inner(wg-trans2, wg-trans2))/sv
+    time3_clean[i] = np.sqrt(np.inner(wg-trans3, wg-trans3))/sv
     
-# # add noise and delay to the signals 
-# time1 = (time1_clean + delay1 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
-# time2 = (time2_clean + delay2 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
-# time3 = (time3_clean + delay3 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
+# add noise and delay to the signals 
+time1 = (time1_clean + delay1 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
+time2 = (time2_clean + delay2 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
+time3 = (time3_clean + delay3 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
 
-# time1 = time1.round()
-# time2 = time2.round()
-# time3 = time3.round()
+time1 = time1.round()
+time2 = time2.round()
+time3 = time3.round()
 
-# # Write delay into text file with times
-# # insert time from random starting point
+# Write delay into text file with times
+# insert time from random starting point
 
-# dates = pd.date_range(pd.Timestamp("26-JUN-23 00:00:07.00"),
-#                       freq="20S", periods = obs_pts)
+dates = pd.date_range(pd.Timestamp("26-JUN-23 00:00:07.00"),
+                      freq="20S", periods = obs_pts)
 
-# dates = dates.strftime("%d-%b-%y %H:%M:%S.%f")
+dates = dates.strftime("%d-%b-%y %H:%M:%S.%f")
 
-# # Convert time array to dataframe
+# Convert time array to dataframe
 
-# twt_df = pd.DataFrame([time1, time2, time3,dates])
-# twt_df = twt_df.T
+twt_df = pd.DataFrame([time1, time2, time3, dates, np.zeros(len(time1))])
+twt_df = twt_df.T
 
-# twt_df.columns=['t1','t2','t3','dates']
-# twt_df = twt_df[['dates','t1','t2','t3']]
-# twt_df = twt_df.round()
+twt_df.columns=['t1','t2','t3','dates','dumb col']
+twt_df = twt_df[['dates','t1','t2','t3', 'dumb col']]
+twt_df[['t1', 't2', 't3']].map('${:,.0f}'.format)
 
-# twt_df.to_csv("./data/twt.txt", index=False, sep='\t', header=False, 
-#               quoting=csv.QUOTE_NONE, quotechar="", escapechar="\\")
+# twt_df.to_csv("./data/twt.txt", index=False, sep = '\t', header=False)
 
+twt_df_str = twt_df.to_string(formatters={'t1': '{:.d}'.format,
+                                          't2': '{:.d}'.format,
+                                          't3': '{:.d}'.format},
+                              header=False, index=False)
+
+#open text file
+text_file = open(r'C:\Users\YXAVION\Documents\GitHub\Seafloor-geodesy-URECA-wave-glider\data\twt.txt', "w")
+ 
+#write string to file
+text_file.write(twt_df_str)
+ 
+#close file
+text_file.close()
 
 
 #%% Points of the wave glider, starting from the first point (0, 2000, 0)
@@ -216,111 +242,154 @@ wg_pos = np.array(positions)
 
 # calculate angle from one point to the other
 
-# temp_lat, temp_long = vinc_pt(45.3023, -124.9656, 0, 2000) #initial point of the shape
-# # circle in this case
+temp_lat, temp_long = vinc_pt(44.8319, -125.1204, 0, rad) #initial point of the shape
+# circle in this case
 
 
-# lat = np.zeros(obs_pts)
-# long = np.zeros(obs_pts)
-# x = np.zeros(obs_pts)
-# y = np.zeros(obs_pts)
-# z = np.zeros(obs_pts)
+lat = np.zeros(obs_pts)
+long = np.zeros(obs_pts)
+x = np.zeros(obs_pts)
+y = np.zeros(obs_pts)
+z = np.zeros(obs_pts)
 
-# tempx, tempy, tempz = geodetic_to_cartesian(temp_lat, temp_long, 0)
+tempx, tempy, tempz = geodetic_to_cartesian(temp_lat, temp_long, 0)
 
-# # first observation point
-# lat[0] = temp_lat
-# long[0] = temp_long
-# x[0] = tempx
-# y[0] = tempy
-# z[0] = tempz
+# first observation point
+lat[0] = temp_lat
+long[0] = temp_long
+x[0] = tempx
+y[0] = tempy
+z[0] = tempz
 
-# bearing_p2p = math.pi/2 # initial bearing if going east, clockwise
+bearing_p2p = math.pi/2 # initial bearing if going east, clockwise
 
-# for i, wg in enumerate(wg_pos):
+for i, wg in enumerate(wg_pos):
 
-#     if i < obs_pts-1:
-#     # calculate bearing of point to point. 
-#         bearing_p2p += stepSize
-#         bearing_dd = bearing_p2p*180/math.pi
-#         dist_moved = math.dist(wg_pos[i], wg_pos[i+1]) # dist moved from pt to pt
+    if i < obs_pts-1:
+    # calculate bearing of point to point. 
+        bearing_p2p += stepSize
+        bearing_dd = bearing_p2p*180/math.pi
+        dist_moved = math.dist(wg_pos[i], wg_pos[i+1]) # dist moved from pt to pt
         
-#         temp_lat, temp_long = vinc_pt(lat[i], long[i], bearing_dd, dist_moved)
-#         lat[i+1] = temp_lat
-#         long[i+1] = temp_long
+        temp_lat, temp_long = vinc_pt(lat[i], long[i], bearing_dd, dist_moved)
+        lat[i+1] = temp_lat
+        long[i+1] = temp_long
     
-#         x[i+1], y[i+1], z[i+1] = geodetic_to_cartesian(lat[i+1], long[i+1], 0)
-#     else:
-#         break
+        x[i+1], y[i+1], z[i+1] = geodetic_to_cartesian(lat[i+1], long[i+1], 0)
+    else:
+        break
 
 
 #%% Make the tranponder position file 
 # needs time in j2000, XYZ, and covar 9 values
 # covariance matrix value will be changed later. 
 
-# start_time = 741009607.0000000
+start_time = 741009607.0000000
 
 
-# data_mat = np.array([start_time, x[0], y[0], z[0], 0.7592545444E-03,
-#                      0.3218813907E-06,  -.3030846830E-05,
-#                      0.3218813907E-06,  0.7594897193E-03,
-#                      -.4333961609E-05,  -.3030846830E-05,
-#                      -.4333961609E-05,  0.7598263681E-03])
+data_mat = np.array([start_time, x[0], y[0], z[0], 
+                     np.random.normal(0.000622428, 0.000671889),
+                     np.random.normal(-2.25e-07, 3.1569927543352893e-06),
+                     np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                     np.random.normal(-2.25E-07, 3.1569927543352893e-06),
+                     np.random.normal(0.000622267, 0.000671086),
+                     np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                     np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                     np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                     np.random.normal(0.000622069, 0.000670237)])
+                     
 
-# for i, wg in enumerate(wg_pos):
+for i, wg in enumerate(wg_pos):
 
-#     data_mat = np.append(data_mat, np.array([start_time + (time1[i]/1e6), x[i], y[i], z[i],
-#                                              0.7592545444E-03,
-#                      0.3218813907E-06,  -.3030846830E-05,
-#                      0.3218813907E-06,  0.7594897193E-03,
-#                      -.4333961609E-05,  -.3030846830E-05,
-#                      -.4333961609E-05,  0.7598263681E-03]))
+    data_mat = np.append(data_mat, np.array([start_time + (time1[i]/1e6), x[i], y[i], z[i],                     np.random.normal(0.000622428, 0.000671889),
+                         np.random.normal(-2.25e-07, 3.1569927543352893e-06),
+                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                         np.random.normal(-2.25E-07, 3.1569927543352893e-06),
+                         np.random.normal(0.000622267, 0.000671086),
+                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                         np.random.normal(0.000622069, 0.000670237)]))
     
-#     data_mat = np.append(data_mat, np.array([start_time + (time2[i]/1e6), x[i], y[i], z[i],
-#                           0.7592545444E-03,
-#                           0.3218813907E-06,  -.3030846830E-05,
-#                           0.3218813907E-06,  0.7594897193E-03,
-#                           -.4333961609E-05,  -.3030846830E-05,
-#                           -.4333961609E-05,  0.7598263681E-03]))
+    data_mat = np.append(data_mat, np.array([start_time + (time2[i]/1e6), x[i], y[i], z[i], np.random.normal(0.000622428, 0.000671889),
+                         np.random.normal(-2.25e-07, 3.1569927543352893e-06),
+                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                         np.random.normal(-2.25E-07, 3.1569927543352893e-06),
+                         np.random.normal(0.000622267, 0.000671086),
+                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                         np.random.normal(0.000622069, 0.000670237)]))
     
-#     data_mat = np.append(data_mat, np.array([start_time + (time3[i]/1e6), x[i], y[i], z[i],
-#                            0.7592545444E-03,
-#                            0.3218813907E-06,  -.3030846830E-05,
-#                            0.3218813907E-06,  0.7594897193E-03,
-#                            -.4333961609E-05,  -.3030846830E-05,
-#                            -.4333961609E-05,  0.7598263681E-03]))
+    data_mat = np.append(data_mat, np.array([start_time + (time3[i]/1e6), x[i], y[i], z[i],                     np.random.normal(0.000622428, 0.000671889),
+                         np.random.normal(-2.25e-07, 3.1569927543352893e-06),
+                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                         np.random.normal(-2.25E-07, 3.1569927543352893e-06),
+                         np.random.normal(0.000622267, 0.000671086),
+                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                         np.random.normal(0.000622069, 0.000670237)]))
     
-#     start_time += 20
+    start_time += 20
     
-#     if i == obs_pts - 1:
-#         break
+    if i == obs_pts - 1:
+        break
     
-#     data_mat = np.append(data_mat, np.array([start_time, x[i+1], y[i+1], z[i+1],
-#                            0.7592545444E-03,
-#                            0.3218813907E-06,  -.3030846830E-05,
-#                            0.3218813907E-06,  0.7594897193E-03,
-#                            -.4333961609E-05,  -.3030846830E-05,
-#                            -.4333961609E-05,  0.7598263681E-03]))
+    data_mat = np.append(data_mat, np.array([start_time, x[i+1], y[i+1], z[i+1],
+                     np.random.normal(0.000622428, 0.000671889),
+                     np.random.normal(-2.25e-07, 3.1569927543352893e-06),
+                     np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                     np.random.normal(-2.25E-07, 3.1569927543352893e-06),
+                     np.random.normal(0.000622267, 0.000671086),
+                     np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                     np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                     np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                     np.random.normal(0.000622069, 0.000670237)]))
 
 
-# data_mat_1 = np.reshape(data_mat, (int(len(data_mat)/13), 13))
+data_mat_1 = np.reshape(data_mat, (int(len(data_mat)/13), 13))
 
-# # add uncertainties to geodetic cartesian coords
-# data_mat_1[:, 1:4] = data_mat_1[:, 1:4] + np.random.normal(
-#     0, 1.5, size=[len(data_mat_1[:, 1:4]), 3])
+# add uncertainties to geodetic cartesian coords
+data_mat_1[:, 1:4] = data_mat_1[:, 1:4] + np.random.normal(
+    0, 1.5, size=[len(data_mat_1[:, 1:4]), 3])
 
 
-# wg_pos_df = pd.DataFrame(data_mat_1)
-# #wg_pos_df['dumb column'] = '   '
-# #wg_pos_df = wg_pos_df[['dumb column',0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]
+wg_pos_df = pd.DataFrame(data_mat_1, columns=['Time', 'x', 'y', 'z', 'cov1', 'cov2','cov3','cov4','cov5','cov6','cov7','cov8','cov9'])
+wg_df_str = wg_pos_df.to_string(formatters={'Time': '{:.6f}'.format,
+                                'x': '{:.3f}'.format,
+                                'y': '{:.3f}'.format,
+                                'z': '{:.3f}'.format,
+                                'cov1': '{:.10e}'.format,
+                                'cov2': '{:.10e}'.format,
+                                'cov3': '{:.10e}'.format,
+                                'cov4': '{:.10e}'.format,
+                                'cov5': '{:.10e}'.format,
+                                'cov6': '{:.10e}'.format,
+                                'cov7': '{:.10e}'.format,
+                                'cov8': '{:.10e}'.format,
+                                'cov9': '{:.10e}'.format}, header=False, index=False)
+
+# import io   
+
+# wg_df = pd.read_csv(io.StringIO(wg_df_str), delim_whitespace=True)
+
+
+#wg_pos_df['dumb column'] = '   '
+#wg_pos_df = wg_pos_df[['dumb column',0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]
 
 #%% Save to data folder
 
+# wg_df.to_csv("./data/wg_pos.txt", index=False, sep=' ', header=False)
 
-# wg_pos_df.to_csv("./data/wg_pos.txt", index=False, sep=' ', header=False, 
-#               quoting=csv.QUOTE_NONE, quotechar="", escapechar="\\")
-
-
+#open text file
+text_file = open(r'C:\Users\YXAVION\Documents\GitHub\Seafloor-geodesy-URECA-wave-glider\data\wg_pos.txt', "w")
+ 
+#write string to file
+text_file.write(wg_df_str)
+ 
+#close file
+text_file.close()
 #    data_mat = np.append(data_mat, np.array([start_time + (time3[i]/1e6), x, y, z,
  #                        random.uniform(0.2e-3,0.8e-3),
   #                       random.uniform(0.1e-6,0.4e-6),
