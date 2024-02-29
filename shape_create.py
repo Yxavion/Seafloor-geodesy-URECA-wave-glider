@@ -9,7 +9,7 @@ Created on Wed Jan 31 10:10:12 2024
 def shape_create(shape, rad, num_pts, num_rot = 5):
     # shape is the shape that you want the wave glider to move
         # circle, radius of rad
-        # square, diagonals of rad
+        # square, diagonals of rad, num_pts must be divisible by 4
         # spiral, spiral radius of rad. default 5 rotations (change using num_rot)
         # figure 8, length of figure 8 is 2*rad
         # random, random points in a circle of radius of rad
@@ -29,7 +29,7 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     #%% circle 
     
     if shape == 'Circle':
-        stepSize= 2 * math.pi / num_pts # for the parametric equation
+        stepSize= 2 * math.pi / (num_pts-1) # for the parametric equation
         
         #Generated vertices
         positions = []
@@ -119,7 +119,7 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
         # equation is x4 = a2(x2 – y2)
         # parametric eqn x = a sin(t), y = a sin(t) cos(t), a is the radius
         
-        stepSize= 2 * math.pi / num_pts # for the parametric equation
+        stepSize= 2 * math.pi / (num_pts-1) # for the parametric equation
         
         #Generated vertices
         positions = []

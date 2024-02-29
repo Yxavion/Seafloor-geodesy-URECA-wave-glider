@@ -7,7 +7,6 @@ Created on Thu Jan 11 14:51:18 2024
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import csv
 import math
 import pyproj
 import scipy
@@ -23,6 +22,14 @@ def geodetic_to_cartesian(lat, lon, alt):
     # Perform the coordinate transformation
     x, y, z = pyproj.transform(lla, ecef, lon, lat, alt, radians=False)
     return x, y, z
+
+def cartesian_to_geodetic(x, y, z):
+    # Define the coordinate systems
+    ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+    lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+    # Perform the coordinate transformation
+    lon, lat, alt = pyproj.transform(ecef, lla, x, y, z, radians=False)
+    return lat, lon, alt
 
 def  vinc_pt(phi1, lembda1, alpha12, s) : 
         import math
@@ -115,6 +122,157 @@ def  vinc_pt(phi1, lembda1, alpha12, s) :
     
     
     
+#%% Shape create function
+# create a shape using equations, load in library needed first
+def shape_create(shape, rad, num_pts, num_rot = 5):
+    # shape is the shape that you want the wave glider to move
+        # circle, radius of rad
+        # square, diagonals of rad, num_pts must be divisible by 4
+        # spiral, spiral radius of rad. default 5 rotations (change using num_rot)
+        # figure 8, length of figure 8 is 2*rad
+        # random, random points in a circle of radius of rad
+    # rad is the radius of the shape that you want to make, usually set to the radius of the transponder array
+    # num_pts is the number of observation points that you want in the shape
+    
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import math
+    import scipy
+    import random
+    
+    
+    # circle 
+    
+    if str.lower(shape) == 'circle':
+        stepSize= 2 * math.pi / (num_pts-1) # for the parametric equation
+        
+        #Generated vertices
+        positions = []
+        
+        t = 0
+        while t < 2 * math.pi:
+            positions.append([rad * math.sin(t), rad * math.cos(t), 0])
+            t += stepSize
+            
+        wg_pos = np.array(positions)
+        
+        plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
+    
+    
+    # Square
+    if str.lower(shape) == 'square':
+        # rad is the diagonal of square, center to the corner of the square
+        side_half = rad * math.sin(math.pi/4) # half of square side length
+        
+        query_pts_per_side = num_pts/4
+        
+        
+        # start from the top left corner
+        # if center is 0,0,0, the top left would be -side/2, side/2
+        # this is going clockwise from the top left
+        corner_pts = np.array([[-side_half, side_half], [side_half, side_half], 
+                           [side_half, -side_half], [-side_half, -side_half]])
+        
+        # query points for the interpolation
+        # top x coords and left y coords share the same values
+        # bot x coords and right y coords share the same values
+        topx_lefty = np.arange(corner_pts[0,0], corner_pts[1,0],
+                               2*side_half/query_pts_per_side)
+        botx_righty = np.arange(corner_pts[1,1], corner_pts[2,1],
+                               -2*side_half/query_pts_per_side)
+        
+        # y points of the top and bot of the squarex
+        topy_rightx = np.interp(topx_lefty ,corner_pts[0:2, 0], corner_pts[0:2, 1])
+        boty_leftx = np.interp(botx_righty ,corner_pts[2:3, 0], corner_pts[2:3, 1])
+        
+        # join all the points into one array
+        
+        top_pts = np.column_stack([topx_lefty, topy_rightx,
+                                   np.zeros(np.size(topx_lefty))])
+        right_pts = np.column_stack([topy_rightx, botx_righty,
+                                     np.zeros(np.size(topx_lefty))])
+        bot_pts = np.column_stack([botx_righty, boty_leftx,
+                                   np.zeros(np.size(topx_lefty))])
+        left_pts = np.column_stack([boty_leftx, topx_lefty,
+                                    np.zeros(np.size(topx_lefty))])
+        
+        
+        # all points together
+        wg_pos = np.concatenate((top_pts, right_pts, bot_pts, left_pts), axis=0)
+        
+        plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
+    
+    # Archemedean spiral
+    
+    if str.lower(shape) == 'spiral':
+        # default will be 5 rotations, ie 10pi
+        
+        # eqn is of radius r = a * theta
+        # spacing between lines is a * pi
+        
+        # parametric equation
+        
+        # radius of query points
+        rad_pts = np.linspace(0, rad, num = num_pts)
+        
+        # get the theta values of the query points
+        a = rad / (num_rot*2*math.pi)
+        theta_pts = rad_pts / a
+        
+        # x will follow rcos(theta) and y will follow rsin(theta)
+        x_spiral = rad_pts * np.cos(theta_pts)
+        y_spiral = rad_pts * np.sin(theta_pts)
+        
+        wg_pos = np.concatenate([x_spiral, y_spiral, np.zeros(np.size(x_spiral))])
+        wg_pos = np.reshape(wg_pos, [num_pts, 3], order='F')
+        
+        plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
+    
+    # Figure , Eight Curve (Leminiscate of Gerono)
+    
+    if str.lower(shape) == 'figure 8':
+        # equation is x4 = a2(x2 – y2)
+        # parametric eqn x = a sin(t), y = a sin(t) cos(t), a is the radius
+        
+        stepSize= 2 * math.pi / (num_pts-1) # for the parametric equation
+        
+        #Generated vertices
+        positions = []
+        
+        t = 0
+        while t < 2 * math.pi:
+            positions.append([rad * math.sin(t), rad * math.cos(t) * math.sin(t), 0])
+            t += stepSize
+            
+        wg_pos = np.array(positions)
+        
+        plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
+    
+    # Random points in a circle
+    
+    if str.lower(shape) == 'random':
+        
+        x_rand = np.array([])
+        y_rand = np.array([])
+        
+        for i in range(0, num_pts): # number of points needed
+            
+            # from https://stackoverflow.com/questions/5837572/generate-a-random-point-within-a-circle-uniformly
+            # explanation is given there
+            r = rad * math.sqrt(random.random())
+            theta = random.random() * 2 * math.pi
+            
+            x_rand = np.append(x_rand, r * math.cos(theta))
+            y_rand = np.append(y_rand, r * math.sin(theta))
+            
+        wg_pos = np.column_stack([x_rand, y_rand, np.zeros(np.size(x_rand))])
+            
+        plt.scatter(x_rand, y_rand)
+    
+    # Final output
+    
+    return wg_pos
+    
 #%% Parameters that are set, change this for diff models
     # use the data that we have gotten from the fortran benchmark for transponders positions
     
@@ -145,40 +303,83 @@ trans3 = np.array([trans3_x, trans3_y, trans3_z])
 
 arr_center = np.array([center_x,center_y, center_z])
 
-sv = np.mean([1480.850, 1480.816, 1480.767])
+#%% calcualte harmonic mean
+
+# read the sound speed file
+
+sv_file = pd.read_csv(r'C:\Users\YXAVION\Documents\GitHub\Seafloor-geodesy-URECA-wave-glider\data\sound_vel.txt', delim_whitespace = True, header = None)
+
+sv = scipy.stats.hmean(sv_file.iloc[:, 1], weights = np.repeat(4, sv_file.shape[0]))
 
 #%% Set up equation for the glider positions
     # will convert to a function later
     # function called shape_create
-
-# parametric equations
-rad = center_depth
-
-#The lower this value the higher quality the circle is with more points generated
-stepSize = 0.01
-
-#Generated vertices
-positions = []
-
-t = 0
-while t < 2 * math.pi:
-    positions.append([rad * math.sin(t), rad * math.cos(t), 0])
-    t += stepSize
     
-wg_pos = np.array(positions)
+rad = 500
+num_pts = 100
+wg_pos = np.array([])
 
-# shift the 0,0,0 to the center of the array on the ocean surface
-# in cartesian, find the point directly above array
-wg_cen_x, wg_cen_y, wg_cen_z = geodetic_to_cartesian(44.8319, -125.1204, 0)
+for i in range(0,3):
+    wg_pos = np.append(wg_pos, shape_create('square', rad, num_pts))
+    
+wg_pos = np.reshape(wg_pos, [int(len(wg_pos)/3), 3])
 
-wg_pos = wg_pos + np.array([wg_cen_x, wg_cen_y, wg_cen_z])
+#%% Points of the wave glider, starting from the first point, directly north
+    # has to be changed to fit all the shapes
+    # change the bearing of the vinc
+    
+# time(no) will be the twt of the transponders for every ping
+obs_pts = len(wg_pos)
 
+# claculate bearing to each point of the
+tan_inputs = wg_pos[:, 1]/ wg_pos[:, 0]
+bearing = np.zeros(len(wg_pos))
+
+for i, tan_input in enumerate(tan_inputs):
+    if wg_pos[i, 0] > 0 and wg_pos[i, 1] > 0: # first quadrant
+        bearing[i] = 90 - (math.atan(tan_input)*180/math.pi)
+        
+    elif wg_pos[i, 0] < 0 and wg_pos[i, 1] > 0: # second quadrant
+        bearing[i] = 270 - (math.atan(tan_input)*180/math.pi)
+        
+    elif wg_pos[i, 0] < 0 and wg_pos[i, 1] < 0: # third quadrant
+        bearing[i] = 270 - (math.atan(tan_input)*180/math.pi)
+        
+    elif wg_pos[i, 0] > 0 and wg_pos[i, 1] < 0: # fourth quadrant
+        bearing[i] = 90 - (math.atan(tan_input)*180/math.pi)
+    
+    elif wg_pos[i, 0] > 0 and wg_pos[i, 1] == 0: # falls on + x axis
+        bearing[i] = 90
+        
+    elif wg_pos[i, 0] == 0 and wg_pos[i, 1] > 0: # falls on + y axis
+        bearing[i] = 0
+    
+    elif wg_pos[i, 0] < 0 and wg_pos[i, 1] == 0: # falls on - x axis
+        bearing[i] = 270
+    
+    elif wg_pos[i, 0] == 0 and wg_pos[i, 1] < 0: # falls on - y axis
+        bearing[i] = 180
+    else:
+        print('Check input')
+        
+        
+lat = np.zeros(obs_pts)
+long = np.zeros(obs_pts)
+x = np.zeros(obs_pts)
+y = np.zeros(obs_pts)
+z = np.zeros(obs_pts)
+
+for i in range(0, len(wg_pos)):
+        
+    dist_moved = math.dist([0,0], wg_pos[i,0:2])
+    lat[i], long[i] = vinc_pt(44.8319, -125.1204, bearing[i], dist_moved)
+    x[i], y[i], z[i] = geodetic_to_cartesian(lat[i], long[i], 0)
+
+wg_pos_xyz = np.transpose(np.array([x,y,z]))
 
 #%% calculate twtt for the trasnponders
 # will not be used first as twt is off
 
-# time(no) will be the twt of the transponders for every ping
-obs_pts = len(wg_pos)
 
 time1_clean = np.zeros(obs_pts)
 time2_clean = np.zeros(obs_pts)
@@ -189,15 +390,15 @@ delay1 = 0.2
 delay2 = 0.32
 delay3 = 0.44
 
-for i, wg in enumerate(wg_pos):
-    time1_clean[i] = np.sqrt(np.inner(wg-trans1, wg-trans1))/sv
-    time2_clean[i] = np.sqrt(np.inner(wg-trans2, wg-trans2))/sv
-    time3_clean[i] = np.sqrt(np.inner(wg-trans3, wg-trans3))/sv
+for i, wg in enumerate(wg_pos_xyz):
+    time1_clean[i] = math.dist(wg, trans1)/sv*2
+    time2_clean[i] = math.dist(wg, trans2)/sv*2
+    time3_clean[i] = math.dist(wg, trans3)/sv*2
     
 # add noise and delay to the signals 
-time1 = (time1_clean + delay1 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
-time2 = (time2_clean + delay2 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
-time3 = (time3_clean + delay3 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
+time1 = (time1_clean + delay1 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
+time2 = (time2_clean + delay2 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
+time3 = (time3_clean + delay3 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
 
 time1 = time1.round()
 time2 = time2.round()
@@ -235,50 +436,6 @@ text_file.write(twt_df_str)
  
 #close file
 text_file.close()
-
-
-#%% Points of the wave glider, starting from the first point (0, 2000, 0)
-    # has to be changed to fit all the shapes
-
-# calculate angle from one point to the other
-
-temp_lat, temp_long = vinc_pt(44.8319, -125.1204, 0, rad) #initial point of the shape
-# circle in this case
-
-
-lat = np.zeros(obs_pts)
-long = np.zeros(obs_pts)
-x = np.zeros(obs_pts)
-y = np.zeros(obs_pts)
-z = np.zeros(obs_pts)
-
-tempx, tempy, tempz = geodetic_to_cartesian(temp_lat, temp_long, 0)
-
-# first observation point
-lat[0] = temp_lat
-long[0] = temp_long
-x[0] = tempx
-y[0] = tempy
-z[0] = tempz
-
-bearing_p2p = math.pi/2 # initial bearing if going east, clockwise
-
-for i, wg in enumerate(wg_pos):
-
-    if i < obs_pts-1:
-    # calculate bearing of point to point. 
-        bearing_p2p += stepSize
-        bearing_dd = bearing_p2p*180/math.pi
-        dist_moved = math.dist(wg_pos[i], wg_pos[i+1]) # dist moved from pt to pt
-        
-        temp_lat, temp_long = vinc_pt(lat[i], long[i], bearing_dd, dist_moved)
-        lat[i+1] = temp_lat
-        long[i+1] = temp_long
-    
-        x[i+1], y[i+1], z[i+1] = geodetic_to_cartesian(lat[i+1], long[i+1], 0)
-    else:
-        break
-
 
 #%% Make the tranponder position file 
 # needs time in j2000, XYZ, and covar 9 values
@@ -352,7 +509,7 @@ data_mat_1 = np.reshape(data_mat, (int(len(data_mat)/13), 13))
 
 # add uncertainties to geodetic cartesian coords
 data_mat_1[:, 1:4] = data_mat_1[:, 1:4] + np.random.normal(
-    0, 1.5, size=[len(data_mat_1[:, 1:4]), 3])
+    0, 0.5, size=[len(data_mat_1[:, 1:4]), 3])
 
 
 wg_pos_df = pd.DataFrame(data_mat_1, columns=['Time', 'x', 'y', 'z', 'cov1', 'cov2','cov3','cov4','cov5','cov6','cov7','cov8','cov9'])
@@ -400,5 +557,12 @@ text_file.close()
        #                  -random.uniform(0.8e-6,0.3e-5),
         #                 -random.uniform(0.1e-5,0.4e-5),
          #                random.uniform(0.2e-3,0.8e-3)]))
+
+#%%
+
+plt.figure()
+plt.plot(long, lat, '.')
+plt.plot([-125.134820280,-125.126649450, -125.099794900, -125.1204],[44.842325200, 44.817929650, 44.832681360, 44.8319], '.')
+
 
 
