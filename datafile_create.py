@@ -273,7 +273,13 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     
     return wg_pos
     
-#%% Parameters that are set, change this for diff models
+#%% Parameters to change for the different models
+
+rad = 1500
+num_pts = 100
+shape = 'spiral'
+
+#%% Parameters that are set for all models
     # use the data that we have gotten from the fortran benchmark for transponders positions
     
 center_depth = np.mean([-1832.8220, -1829.6450, -1830.7600])
@@ -315,12 +321,11 @@ sv = scipy.stats.hmean(sv_file.iloc[:, 1], weights = np.repeat(4, sv_file.shape[
     # will convert to a function later
     # function called shape_create
     
-rad = 500
-num_pts = 100
+
 wg_pos = np.array([])
 
 for i in range(0,3):
-    wg_pos = np.append(wg_pos, shape_create('square', rad, num_pts))
+    wg_pos = np.append(wg_pos, shape_create(shape, rad, num_pts))
     
 wg_pos = np.reshape(wg_pos, [int(len(wg_pos)/3), 3])
 
@@ -372,7 +377,12 @@ z = np.zeros(obs_pts)
 for i in range(0, len(wg_pos)):
         
     dist_moved = math.dist([0,0], wg_pos[i,0:2])
-    lat[i], long[i] = vinc_pt(44.8319, -125.1204, bearing[i], dist_moved)
+    if dist_moved == 0:
+        lat[i] = 44.8319
+        long[i] = -125.1204
+    else:
+        lat[i], long[i] = vinc_pt(44.8319, -125.1204, bearing[i], dist_moved)
+        
     x[i], y[i], z[i] = geodetic_to_cartesian(lat[i], long[i], 0)
 
 wg_pos_xyz = np.transpose(np.array([x,y,z]))
@@ -396,9 +406,9 @@ for i, wg in enumerate(wg_pos_xyz):
     time3_clean[i] = math.dist(wg, trans3)/sv*2
     
 # add noise and delay to the signals 
-time1 = (time1_clean + delay1 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
-time2 = (time2_clean + delay2 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
-time3 = (time3_clean + delay3 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
+time1 = (time1_clean + delay1 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
+time2 = (time2_clean + delay2 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
+time3 = (time3_clean + delay3 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
 
 time1 = time1.round()
 time2 = time2.round()
@@ -507,9 +517,9 @@ for i, wg in enumerate(wg_pos):
 
 data_mat_1 = np.reshape(data_mat, (int(len(data_mat)/13), 13))
 
-# add uncertainties to geodetic cartesian coords
-data_mat_1[:, 1:4] = data_mat_1[:, 1:4] + np.random.normal(
-    0, 0.5, size=[len(data_mat_1[:, 1:4]), 3])
+# # add uncertainties to geodetic cartesian coords
+# data_mat_1[:, 1:4] = data_mat_1[:, 1:4] + np.random.normal(
+#     0, 0.5, size=[len(data_mat_1[:, 1:4]), 3])
 
 
 wg_pos_df = pd.DataFrame(data_mat_1, columns=['Time', 'x', 'y', 'z', 'cov1', 'cov2','cov3','cov4','cov5','cov6','cov7','cov8','cov9'])
@@ -558,11 +568,16 @@ text_file.close()
         #                 -random.uniform(0.1e-5,0.4e-5),
          #                random.uniform(0.2e-3,0.8e-3)]))
 
-#%%
+#%% save lat long of the data so that we can map it out
 
 plt.figure()
 plt.plot(long, lat, '.')
 plt.plot([-125.134820280,-125.126649450, -125.099794900, -125.1204],[44.842325200, 44.817929650, 44.832681360, 44.8319], '.')
 
-
-
+array_pts = pd.DataFrame([[-125.134820280,-125.126649450, -125.099794900, -125.1204],[44.842325200, 44.817929650, 44.832681360, 44.8319]]).transpose()
+array_pts.columns = ['long', 'lat']
+lat_long_df = pd.DataFrame([lat, long]).transpose()
+lat_long_df.columns = ['lat', 'long']
+shape_coord_file = str(shape) + '_' + str(rad) + 'm_' + str(num_pts) + 'p.csv' 
+lat_long_df.to_csv('C:/Users/YXAVION/Documents/GitHub/Seafloor-geodesy-URECA-wave-glider/' + shape_coord_file ,sep = ',', index = False)
+# array_pts.to_csv(r'C:/Users/YXAVION/Documents/GitHub/Seafloor-geodesy-URECA-wave-glider/array_lat_long.csv',sep = ',', index = False)
