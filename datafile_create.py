@@ -10,6 +10,8 @@ import numpy as np
 import math
 import pyproj
 import scipy
+import arlpy.uwapm as pm
+import arlpy.plot as arlplt
 
 #%% defining functions lat lon to xyz and vincenty forward equation for WGS84
 #### have to create func to get points for a certain shape
@@ -119,9 +121,6 @@ def  vinc_pt(phi1, lembda1, alpha12, s) :
         alpha21 = alpha21 * 45.0 / piD4
         return phi2, lembda2
     
-    
-    
-    
 #%% Shape create function
 # create a shape using equations, load in library needed first
 def shape_create(shape, rad, num_pts, num_rot = 5):
@@ -140,7 +139,6 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     import scipy
     import random
     
-    
     # circle 
     
     if str.lower(shape) == 'circle':
@@ -157,7 +155,6 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
         wg_pos = np.array(positions)
         
         plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
-    
     
     # Square
     if str.lower(shape) == 'square':
@@ -272,59 +269,96 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     # Final output
     
     return wg_pos
+
+#%% two way time function using bellhop
+
+def twt_calc(seafloor_depth, soundspeed, horizontal_dist, trans_depth):
+    # must have bellhop installed and in the path
+    # horizontal_dist is the horizontal dist from the wave glider to the transponder
+    # trans_depth is the depth from the wave glider to the transponder
+    # default wave glider source depth = 0.1m
+    # seafloor depth is positive
+    env = pm.create_env2d(
+        depth=seafloor_depth,
+        soundspeed = soundspeed,
+        tx_depth = 0.1, # default wave glider transmission depth,
+        rx_depth = trans_depth,
+        rx_range = horizontal_dist, 
+        max_angle = -30, 
+        min_angle = -89.999
+    )
+    
+    arrivals = pm.compute_arrivals(env)
+    first_arrivals = arrivals.loc[arrivals['surface_bounces'] == 0]
+    first_arrivals = first_arrivals.loc[first_arrivals['bottom_bounces'] == 0]
+    
+    arrival_time = first_arrivals['time_of_arrival']
+    arrival_time = min(arrival_time.to_numpy())
+    
+    return arrival_time
     
 #%% Parameters to change for the different models
 
 rad = 1500
 num_pts = 100
-shape = 'spiral'
+shape = 'circle'
+
 
 #%% Parameters that are set for all models
     # use the data that we have gotten from the fortran benchmark for transponders positions
+    # mainly used for plotting instead of calculation
     
-center_depth = np.mean([-1832.8220, -1829.6450, -1830.7600])
+trans1_depth = 1832.8220
+trans2_depth = 1829.6450
+trans3_depth = 1830.7600
+    
+center_depth = np.mean([trans1_depth, trans2_depth, trans3_depth])
 
 # center of the arrayin xyz
-center_x, center_y, center_z = geodetic_to_cartesian(44.8319, -125.1204, center_depth)
+center_x, center_y, center_z = geodetic_to_cartesian(44.8319, -125.1204, -center_depth)
 
 # transponder positions in xyz
 # transponder 1,2,3 has delays, 0.2s, 0.32s and 0.44s respectively
-# mainly for calculating two way time only
 trans1_x, trans1_y, trans1_z = geodetic_to_cartesian(lat = 44.832681360, 
                                                      lon = -125.099794900,
-                                                     alt = -1832.8220)
+                                                     alt = -trans1_depth)
 
 trans2_x, trans2_y, trans2_z = geodetic_to_cartesian(lat = 44.817929650, 
                                                      lon = -125.126649450, 
-                                                     alt = -1829.6450)
+                                                     alt = -trans2_depth)
 
 trans3_x, trans3_y, trans3_z = geodetic_to_cartesian(lat = 44.842325200,
                                                      lon = -125.134820280,
-                                                     alt = -1830.7600)
+                                                     alt = -trans3_depth)
 
-##### temporary workaround
 trans1 = np.array([trans1_x, trans1_y, trans1_z])
 trans2 = np.array([trans2_x, trans2_y, trans2_z])
 trans3 = np.array([trans3_x, trans3_y, trans3_z])
 
 arr_center = np.array([center_x,center_y, center_z])
 
-#%% calcualte harmonic mean
+#%% sound speed profile file
 
-# read the sound speed file
+sv_file = pd.read_csv('./data/sound_vel.txt', delim_whitespace = True, header = None)
 
-sv_file = pd.read_csv(r'C:\Users\YXAVION\Documents\GitHub\Seafloor-geodesy-URECA-wave-glider\data\sound_vel.txt', delim_whitespace = True, header = None)
+# convert soundspeed profile for bellhop to use
+sv_file[0] = sv_file[0].abs()
+# speed at depth 0 
+sv0_line = scipy.interpolate.interp1d(sv_file[0], sv_file[1], fill_value = "extrapolate")
+sv0 = sv0_line(0)
+sv0_df = pd.DataFrame(np.array([0, sv0])).transpose()
 
-sv = scipy.stats.hmean(sv_file.iloc[:, 1], weights = np.repeat(4, sv_file.shape[0]))
+sv = pd.concat([sv0_df, sv_file])
+sv = sv.values.tolist()
 
 #%% Set up equation for the glider positions
     # will convert to a function later
     # function called shape_create
+    # the loop will be for multiple iterations of the same shape to add some noise and test the shape thoroughly
     
-
 wg_pos = np.array([])
 
-for i in range(0,3):
+for i in range(0,1):
     wg_pos = np.append(wg_pos, shape_create(shape, rad, num_pts))
     
 wg_pos = np.reshape(wg_pos, [int(len(wg_pos)/3), 3])
@@ -388,8 +422,6 @@ for i in range(0, len(wg_pos)):
 wg_pos_xyz = np.transpose(np.array([x,y,z]))
 
 #%% calculate twtt for the trasnponders
-# will not be used first as twt is off
-
 
 time1_clean = np.zeros(obs_pts)
 time2_clean = np.zeros(obs_pts)
@@ -401,14 +433,27 @@ delay2 = 0.32
 delay3 = 0.44
 
 for i, wg in enumerate(wg_pos_xyz):
-    time1_clean[i] = math.dist(wg, trans1)/sv*2
-    time2_clean[i] = math.dist(wg, trans2)/sv*2
-    time3_clean[i] = math.dist(wg, trans3)/sv*2
+    # distance of the glider to transponders
+    dist1 = math.dist(wg, trans1)
+    hor_dist1 = np.sqrt(dist1**2 - trans1_depth**2)
+    time1_clean[i] = 2 * twt_calc(1880, sv, hor_dist1, trans1_depth)
     
-# add noise and delay to the signals 
-time1 = (time1_clean + delay1 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
-time2 = (time2_clean + delay2 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
-time3 = (time3_clean + delay3 + np.random.normal(0, 0.0001, time1_clean.size))*10**6
+    dist2 = math.dist(wg, trans2)
+    hor_dist2 = np.sqrt(dist2**2 - trans2_depth**2)
+    time2_clean[i] = 2 * twt_calc(1880, sv, hor_dist2, trans2_depth)
+    
+    dist3 = math.dist(wg, trans3)
+    hor_dist3 = np.sqrt(dist3**2 - trans3_depth**2)
+    time3_clean[i] = 2 * twt_calc(1880, sv, hor_dist3, trans2_depth)
+    
+    
+    
+#%%
+# add noise and delay to the signals
+# convert to ms for the file
+time1 = (time1_clean + delay1 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
+time2 = (time2_clean + delay2 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
+time3 = (time3_clean + delay3 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
 
 time1 = time1.round()
 time2 = time2.round()
@@ -439,7 +484,7 @@ twt_df_str = twt_df.to_string(formatters={'t1': '{:.d}'.format,
                               header=False, index=False)
 
 #open text file
-text_file = open(r'C:\Users\YXAVION\Documents\GitHub\Seafloor-geodesy-URECA-wave-glider\data\twt.txt', "w")
+text_file = open('./data/twt.txt', "w")
  
 #write string to file
 text_file.write(twt_df_str)

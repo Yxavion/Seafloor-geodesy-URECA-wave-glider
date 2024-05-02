@@ -16,12 +16,8 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     # rad is the radius of the shape that you want to make, usually set to the radius of the transponder array
     # num_pts is the number of observation points that you want in the shape
     
-    
-    
-    
     import matplotlib.pyplot as plt
     import numpy as np
-    import math
     import scipy
     import random
     
@@ -29,17 +25,10 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     #%% circle 
     
     if shape == 'Circle':
-        stepSize= 2 * math.pi / (num_pts-1) # for the parametric equation
         
-        #Generated vertices
-        positions = []
-        
-        t = 0
-        while t < 2 * math.pi:
-            positions.append([rad * math.sin(t), rad * math.cos(t), 0])
-            t += stepSize
+        t = np.linspace(0, 2*np.pi, num = num_pts)
             
-        wg_pos = np.array(positions)
+        wg_pos = np.transpose(np.array([rad * np.sin(t), rad * np.cos(t), np.zeros(np.size(t))]))
         
         plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
     
@@ -47,10 +36,9 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     #%% Square
     if shape == 'Square':
         # rad is the diagonal of square, center to the corner of the square
-        side_half = rad * math.sin(math.pi/4) # half of square side length
+        side_half = rad * np.sin(np.pi/4) # half of square side length
         
         query_pts_per_side = num_pts/4
-        
         
         # start from the top left corner
         # if center is 0,0,0, the top left would be -side/2, side/2
@@ -81,78 +69,58 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
         left_pts = np.column_stack([boty_leftx, topx_lefty,
                                     np.zeros(np.size(topx_lefty))])
         
-        
         # all points together
         wg_pos = np.concatenate((top_pts, right_pts, bot_pts, left_pts), axis=0)
         
-        plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
     
     #%% Archemedean spiral
     
     if shape == 'Spiral':
+        
         # default will be 5 rotations, ie 10pi
-        
-        # eqn is of radius r = a * theta
-        # spacing between lines is a * pi
-        
+        # default a = 0
+
         # parametric equation
-        
-        # radius of query points
-        rad_pts = np.linspace(0, rad, num = num_pts)
-        
-        # get the theta values of the query points
-        a = rad / (num_rot*2*math.pi)
-        theta_pts = rad_pts / a
-        
+        #x(θ) = (a + bθ) cos θ,
+        #y(θ) = (a + bθ) sin θ
+        # a = 0 as we start from 0
+        b =  rad / (num_rot*2*np.pi)
+  
+        # find the arc length so that we can find a spacing to use for equal spacing
+        # define the integral first
+        def f(x):
+            return np.sqrt(((b*np.cos(x) - (b*x)*np.sin(x))**2) + (b*np.sin(x) + (b*x)*np.cos(x))**2)
+  
+        theta_low = 0
+        theta_high = num_rot*2*np.pi
+        arc_len, err = scipy.integrate.quad(f, theta_low, theta_high)
+  
+        arc_intervals = np.linspace(0, arc_len, num = num_pts)
+        thetas = np.sqrt(2 * arc_intervals / b)
+  
         # x will follow rcos(theta) and y will follow rsin(theta)
-        x_spiral = rad_pts * np.cos(theta_pts)
-        y_spiral = rad_pts * np.sin(theta_pts)
-        
+        x_spiral = np.multiply(b*thetas, np.cos(thetas))
+        y_spiral = np.multiply(b*thetas, np.sin(thetas))
+  
         wg_pos = np.concatenate([x_spiral, y_spiral, np.zeros(np.size(x_spiral))])
         wg_pos = np.reshape(wg_pos, [num_pts, 3], order='F')
-        
+  
         plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
+      
     
-    #%% Figure , Eight Curve (Leminiscate of Gerono)
+    #%% Figure , Eight Curve (Lemniscate of Bernoulli)
     
     if shape == 'Figure 8':
-        # equation is x4 = a2(x2 – y2)
-        # parametric eqn x = a sin(t), y = a sin(t) cos(t), a is the radius
-        
-        stepSize= 2 * math.pi / (num_pts-1) # for the parametric equation
-        
-        #Generated vertices
-        positions = []
-        
-        t = 0
-        while t < 2 * math.pi:
-            positions.append([rad * math.sin(t), rad * math.cos(t) * math.sin(t), 0])
-            t += stepSize
-            
-        wg_pos = np.array(positions)
-        
+        # Lemniscate of Bernoulli
+
+        t = np.linspace(0, 2*np.pi, num = num_pts)
+
+        x = rad * np.cos(t) / (np.sin(t)**2 + 1)
+        y = rad * np.cos(t) * np.sin(t) / (np.sin(t)**2 + 1)
+
+        wg_pos = np.transpose(np.array([x, y, np.zeros(np.size(t))]))
+
         plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
-    
-    #%% Random points in a circle
-    
-    if shape == 'Random':
-        
-        x_rand = np.array([])
-        y_rand = np.array([])
-        
-        for i in range(0, num_pts): # number of points needed
-            
-            # from https://stackoverflow.com/questions/5837572/generate-a-random-point-within-a-circle-uniformly
-            # explanation is given there
-            r = rad * math.sqrt(random.random())
-            theta = random.random() * 2 * math.pi
-            
-            x_rand = np.append(x_rand, r * math.cos(theta))
-            y_rand = np.append(y_rand, r * math.sin(theta))
-            
-        wg_pos = np.column_stack([x_rand, y_rand, np.zeros(np.size(x_rand))])
-            
-        plt.scatter(x_rand, y_rand)
     
     #%% Final output
     
