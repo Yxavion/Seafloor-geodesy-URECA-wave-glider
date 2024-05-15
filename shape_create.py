@@ -5,7 +5,8 @@ Created on Wed Jan 31 10:10:12 2024
 @author: YXAVION
 """
 
-#%% create a shape using equations, load in library needed first
+#%% Shape create function
+# create a shape using equations, load in library needed first
 def shape_create(shape, rad, num_pts, num_rot = 5):
     # shape is the shape that you want the wave glider to move
         # circle, radius of rad
@@ -18,27 +19,29 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     
     import matplotlib.pyplot as plt
     import numpy as np
+    import math
     import scipy
     import random
     
+    # circle 
     
-    #%% circle 
-    
-    if shape == 'Circle':
+    if str.lower(shape) == 'circle':
+      
         
         t = np.linspace(0, 2*np.pi, num = num_pts)
             
-        wg_pos = np.transpose(np.array([rad * np.sin(t), rad * np.cos(t), np.zeros(np.size(t))]))
+        wg_pos = np.transpose(np.array([rad * np.sin(t), rad * np.cos(t), np.repeat(-4, num_pts)]))
         
         plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
     
     
-    #%% Square
-    if shape == 'Square':
+    # Square
+    if str.lower(shape) == 'square':
         # rad is the diagonal of square, center to the corner of the square
-        side_half = rad * np.sin(np.pi/4) # half of square side length
+        side_half = rad * math.sin(math.pi/4) # half of square side length
         
         query_pts_per_side = num_pts/4
+        
         
         # start from the top left corner
         # if center is 0,0,0, the top left would be -side/2, side/2
@@ -69,14 +72,15 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
         left_pts = np.column_stack([boty_leftx, topx_lefty,
                                     np.zeros(np.size(topx_lefty))])
         
+        
         # all points together
         wg_pos = np.concatenate((top_pts, right_pts, bot_pts, left_pts), axis=0)
         
+        plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
     
-    #%% Archemedean spiral
+    # Archemedean spiral
     
-    if shape == 'Spiral':
-        
+    if str.lower(shape) == 'spiral':
         # default will be 5 rotations, ie 10pi
         # default a = 0
 
@@ -106,11 +110,11 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
         wg_pos = np.reshape(wg_pos, [num_pts, 3], order='F')
   
         plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
-      
     
-    #%% Figure , Eight Curve (Lemniscate of Bernoulli)
+    # Figure , Eight Curve (Leminiscate of Gerono)
     
-    if shape == 'Figure 8':
+    if str.lower(shape) == 'figure 8':
+    # Figure , Eight Curve (Lemniscate of Bernoulli)
         # Lemniscate of Bernoulli
 
         t = np.linspace(0, 2*np.pi, num = num_pts)
@@ -122,39 +126,49 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
 
         plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
     
-    #%% Final output
+    # Random points in a circle
+    
+    if str.lower(shape) == 'random':
+        
+        x_rand = np.array([])
+        y_rand = np.array([])
+        
+        for i in range(0, num_pts): # number of points needed
+            
+            # from https://stackoverflow.com/questions/5837572/generate-a-random-point-within-a-circle-uniformly
+            # explanation is given there
+            r = rad * math.sqrt(random.random())
+            theta = random.random() * 2 * math.pi
+            
+            x_rand = np.append(x_rand, r * math.cos(theta))
+            y_rand = np.append(y_rand, r * math.sin(theta))
+            
+        wg_pos = np.column_stack([x_rand, y_rand, np.zeros(np.size(x_rand))])
+            
+        plt.scatter(x_rand, y_rand)
+    
+    if str.lower(shape) == 'clover':
+        # 2 figure Eight Curve (Lemniscate of Bernoulli) perpendicular to each other. 
+
+            t = np.linspace(0, 2*np.pi, num = int(num_pts/2))
+
+            x = rad * np.cos(t) / (np.sin(t)**2 + 1)
+            y = rad * np.cos(t) * np.sin(t) / (np.sin(t)**2 + 1)
+
+            wg_pos1 = np.transpose(np.array([x, y, np.zeros(np.size(t))]))
+            R_z90 = np.array([[0, -1, 0],
+                              [1, 0, 0],
+                              [0, 0, 1]])
+            
+            wg_pos2 = np.matmul(wg_pos1, R_z90)
+            wg_pos = np.row_stack([wg_pos1, wg_pos2])
+            
+            
+            plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
+    
+    # Final output
     
     return wg_pos
-    
-        
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

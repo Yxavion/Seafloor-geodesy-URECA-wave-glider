@@ -1,8 +1,8 @@
 site_id: NDP1
 
 solver:
-  distance_limit: 5000
-  residual_limit: 400000000000
+  distance_limit: 30000
+  residual_limit: 100
   transponders: # list out all transponder and info
     - lat: 44.832681360
       lon: -125.099794900

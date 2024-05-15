@@ -6,12 +6,21 @@ Created on Thu Jan 11 14:51:18 2024
 """
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib_inline
+import matplotlib
 import numpy as np
 import math
 import pyproj
 import scipy
 import arlpy.uwapm as pm
-import arlpy.plot as arlplt
+import os
+import shutil
+import subprocess
+
+def warn(*args, **kwargs):
+    pass
+import warnings
+warnings.warn = warn
 
 #%% defining functions lat lon to xyz and vincenty forward equation for WGS84
 #### have to create func to get points for a certain shape
@@ -52,9 +61,11 @@ def  vinc_pt(phi1, lembda1, alpha12, s) :
         from a forum and its license is not clear. I'll reimplement with
         GPL3 as soon as possible.
         The code has been taken from
-        https://isis.astrogeology.usgs.gov/IsisSupport/index.php?topic=408.0
+        https://isis.astrogeology.usgs.gov/IsisSupport/index.php?topic=408.0 (broken link)
         and refers to (broken link)
         http://wegener.mechanik.tu-darmstadt.de/GMT-Help/Archiv/att-8710/Geodetic_py
+        
+        Taken from Github by jtornero: https://gist.github.com/jtornero/9f3ddabc6a89f8292bb2
         """ 
         a = 6378137.0
         f = 1/298.257222101
@@ -121,8 +132,72 @@ def  vinc_pt(phi1, lembda1, alpha12, s) :
         alpha21 = alpha21 * 45.0 / piD4
         return phi2, lembda2
     
-#%% Shape create function
+# vincenty inverse formula from: https://www.johndcook.com/blog/2018/11/24/spheroid-distance/
+from scipy import sin, cos, tan, arctan, arctan2
+
+def ellipsoidal_distance(lat1, long1, lat2, long2):
+
+    a = 6378137.0 # equatorial radius in meters 
+    f = 1/298.257223563 # ellipsoid flattening 
+    b = (1 - f)*a 
+    tolerance = 1e-11 # to stop iteration
+
+    phi1, phi2 = lat1, lat2
+    U1 = arctan((1-f)*tan(phi1))
+    U2 = arctan((1-f)*tan(phi2))
+    L1, L2 = long1, long2
+    L = L2 - L1
+
+    lambda_old = L + 0
+
+    while True:
+    
+        t = (cos(U2)*sin(lambda_old))**2
+        t += (cos(U1)*sin(U2) - sin(U1)*cos(U2)*cos(lambda_old))**2
+        sin_sigma = t**0.5
+        cos_sigma = sin(U1)*sin(U2) + cos(U1)*cos(U2)*cos(lambda_old)
+        sigma = arctan2(sin_sigma, cos_sigma) 
+    
+        sin_alpha = cos(U1)*cos(U2)*sin(lambda_old) / sin_sigma
+        cos_sq_alpha = 1 - sin_alpha**2
+        cos_2sigma_m = cos_sigma - 2*sin(U1)*sin(U2)/cos_sq_alpha
+        C = f*cos_sq_alpha*(4 + f*(4-3*cos_sq_alpha))/16
+    
+        t = sigma + C*sin_sigma*(cos_2sigma_m + C*cos_sigma*(-1 + 2*cos_2sigma_m**2))
+        lambda_new = L + (1 - C)*f*sin_alpha*t
+        if abs(lambda_new - lambda_old) <= tolerance:
+            break
+        else:
+            lambda_old = lambda_new
+
+    u2 = cos_sq_alpha*((a**2 - b**2)/b**2)
+    A = 1 + (u2/16384)*(4096 + u2*(-768+u2*(320 - 175*u2)))
+    B = (u2/1024)*(256 + u2*(-128 + u2*(74 - 47*u2)))
+    t = cos_2sigma_m + 0.25*B*(cos_sigma*(-1 + 2*cos_2sigma_m**2))
+    t -= (B/6)*cos_2sigma_m*(-3 + 4*sin_sigma**2)*(-3 + 4*cos_2sigma_m**2)
+    delta_sigma = B * sin_sigma * t
+    s = b*A*(sigma - delta_sigma)
+
+    return s
+
+# from: https://stackoverflow.com/questions/3932502/calculate-angle-between-two-latitude-longitude-points
+def angleFromCoordinate(lat1, long1, lat2, long2):
+    dLon = (long2 - long1)
+
+    y = math.sin(dLon) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dLon)
+
+    brng = math.atan2(y, x)
+
+    brng = math.degrees(brng)
+    brng = (brng + 360) % 360
+    brng = 360 - brng # count degrees clockwise - remove to make counter-clockwise
+
+    return brng
+    
+#%% Shape create function 
 # create a shape using equations, load in library needed first
+# function for shapes around origin / array center
 def shape_create(shape, rad, num_pts, num_rot = 5):
     # shape is the shape that you want the wave glider to move
         # circle, radius of rad
@@ -130,6 +205,7 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
         # spiral, spiral radius of rad. default 5 rotations (change using num_rot)
         # figure 8, length of figure 8 is 2*rad
         # random, random points in a circle of radius of rad
+        # clover
     # rad is the radius of the shape that you want to make, usually set to the radius of the transponder array
     # num_pts is the number of observation points that you want in the shape
     
@@ -142,19 +218,14 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     # circle 
     
     if str.lower(shape) == 'circle':
-        stepSize= 2 * math.pi / (num_pts-1) # for the parametric equation
+      
         
-        #Generated vertices
-        positions = []
-        
-        t = 0
-        while t < 2 * math.pi:
-            positions.append([rad * math.sin(t), rad * math.cos(t), 0])
-            t += stepSize
+        t = np.linspace(0, 2*np.pi, num = num_pts)
             
-        wg_pos = np.array(positions)
+        wg_pos = np.transpose(np.array([rad * np.sin(t), rad * np.cos(t), np.repeat(-4, num_pts)]))
         
         plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
+    
     
     # Square
     if str.lower(shape) == 'square':
@@ -203,46 +274,48 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     
     if str.lower(shape) == 'spiral':
         # default will be 5 rotations, ie 10pi
-        
-        # eqn is of radius r = a * theta
-        # spacing between lines is a * pi
-        
+        # default a = 0
+
         # parametric equation
-        
-        # radius of query points
-        rad_pts = np.linspace(0, rad, num = num_pts)
-        
-        # get the theta values of the query points
-        a = rad / (num_rot*2*math.pi)
-        theta_pts = rad_pts / a
-        
+        #x(θ) = (a + bθ) cos θ,
+        #y(θ) = (a + bθ) sin θ
+        # a = 0 as we start from 0
+        b =  rad / (num_rot*2*np.pi)
+  
+        # find the arc length so that we can find a spacing to use for equal spacing
+        # define the integral first
+        def f(x):
+            return np.sqrt(((b*np.cos(x) - (b*x)*np.sin(x))**2) + (b*np.sin(x) + (b*x)*np.cos(x))**2)
+  
+        theta_low = 0
+        theta_high = num_rot*2*np.pi
+        arc_len, err = scipy.integrate.quad(f, theta_low, theta_high)
+  
+        arc_intervals = np.linspace(0, arc_len, num = num_pts)
+        thetas = np.sqrt(2 * arc_intervals / b)
+  
         # x will follow rcos(theta) and y will follow rsin(theta)
-        x_spiral = rad_pts * np.cos(theta_pts)
-        y_spiral = rad_pts * np.sin(theta_pts)
-        
+        x_spiral = np.multiply(b*thetas, np.cos(thetas))
+        y_spiral = np.multiply(b*thetas, np.sin(thetas))
+  
         wg_pos = np.concatenate([x_spiral, y_spiral, np.zeros(np.size(x_spiral))])
         wg_pos = np.reshape(wg_pos, [num_pts, 3], order='F')
-        
+  
         plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
     
     # Figure , Eight Curve (Leminiscate of Gerono)
     
     if str.lower(shape) == 'figure 8':
-        # equation is x4 = a2(x2 – y2)
-        # parametric eqn x = a sin(t), y = a sin(t) cos(t), a is the radius
-        
-        stepSize= 2 * math.pi / (num_pts-1) # for the parametric equation
-        
-        #Generated vertices
-        positions = []
-        
-        t = 0
-        while t < 2 * math.pi:
-            positions.append([rad * math.sin(t), rad * math.cos(t) * math.sin(t), 0])
-            t += stepSize
-            
-        wg_pos = np.array(positions)
-        
+    # Figure , Eight Curve (Lemniscate of Bernoulli)
+        # Lemniscate of Bernoulli
+
+        t = np.linspace(0, 2*np.pi, num = num_pts)
+
+        x = rad * np.cos(t) / (np.sin(t)**2 + 1)
+        y = rad * np.cos(t) * np.sin(t) / (np.sin(t)**2 + 1)
+
+        wg_pos = np.transpose(np.array([x, y, np.zeros(np.size(t))]))
+
         plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
     
     # Random points in a circle
@@ -265,8 +338,26 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
         wg_pos = np.column_stack([x_rand, y_rand, np.zeros(np.size(x_rand))])
             
         plt.scatter(x_rand, y_rand)
-    
-    # Final output
+        
+    if str.lower(shape) == 'clover':
+        # 2 figure Eight Curve (Lemniscate of Bernoulli) perpendicular to each other. 
+
+            t = np.linspace(0, 2*np.pi, num = int(num_pts/2))
+
+            x = rad * np.cos(t) / (np.sin(t)**2 + 1)
+            y = rad * np.cos(t) * np.sin(t) / (np.sin(t)**2 + 1)
+
+            wg_pos1 = np.transpose(np.array([x, y, np.zeros(np.size(t))]))
+            R_z90 = np.array([[0, -1, 0],
+                              [1, 0, 0],
+                              [0, 0, 1]])
+            
+            wg_pos2 = np.matmul(wg_pos1, R_z90)
+            wg_pos = np.row_stack([wg_pos1, wg_pos2])
+            
+            
+            plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
+# Final output
     
     return wg_pos
 
@@ -281,63 +372,22 @@ def twt_calc(seafloor_depth, soundspeed, horizontal_dist, trans_depth):
     env = pm.create_env2d(
         depth=seafloor_depth,
         soundspeed = soundspeed,
-        tx_depth = 0.1, # default wave glider transmission depth,
+        tx_depth = 0.0001, # default wave glider transmission depth,
         rx_depth = trans_depth,
         rx_range = horizontal_dist, 
-        max_angle = -30, 
-        min_angle = -89.999
+        max_angle = 89.999, 
+        min_angle = 15
     )
     
     arrivals = pm.compute_arrivals(env)
-    first_arrivals = arrivals.loc[arrivals['surface_bounces'] == 0]
-    first_arrivals = first_arrivals.loc[first_arrivals['bottom_bounces'] == 0]
+    # first_arrivals = arrivals.loc[arrivals['surface_bounces'] == 0]
+    # first_arrivals = first_arrivals.loc[first_arrivals['bottom_bounces'] == 0]
     
-    arrival_time = first_arrivals['time_of_arrival']
-    arrival_time = min(arrival_time.to_numpy())
+    arrival_time = min(arrivals['time_of_arrival'].to_numpy())
     
     return arrival_time
-    
-#%% Parameters to change for the different models
 
-rad = 1500
-num_pts = 100
-shape = 'circle'
-
-
-#%% Parameters that are set for all models
-    # use the data that we have gotten from the fortran benchmark for transponders positions
-    # mainly used for plotting instead of calculation
-    
-trans1_depth = 1832.8220
-trans2_depth = 1829.6450
-trans3_depth = 1830.7600
-    
-center_depth = np.mean([trans1_depth, trans2_depth, trans3_depth])
-
-# center of the arrayin xyz
-center_x, center_y, center_z = geodetic_to_cartesian(44.8319, -125.1204, -center_depth)
-
-# transponder positions in xyz
-# transponder 1,2,3 has delays, 0.2s, 0.32s and 0.44s respectively
-trans1_x, trans1_y, trans1_z = geodetic_to_cartesian(lat = 44.832681360, 
-                                                     lon = -125.099794900,
-                                                     alt = -trans1_depth)
-
-trans2_x, trans2_y, trans2_z = geodetic_to_cartesian(lat = 44.817929650, 
-                                                     lon = -125.126649450, 
-                                                     alt = -trans2_depth)
-
-trans3_x, trans3_y, trans3_z = geodetic_to_cartesian(lat = 44.842325200,
-                                                     lon = -125.134820280,
-                                                     alt = -trans3_depth)
-
-trans1 = np.array([trans1_x, trans1_y, trans1_z])
-trans2 = np.array([trans2_x, trans2_y, trans2_z])
-trans3 = np.array([trans3_x, trans3_y, trans3_z])
-
-arr_center = np.array([center_x,center_y, center_z])
-
-#%% sound speed profile file
+#%% sound speed profile
 
 sv_file = pd.read_csv('./data/sound_vel.txt', delim_whitespace = True, header = None)
 
@@ -350,279 +400,432 @@ sv0_df = pd.DataFrame(np.array([0, sv0])).transpose()
 
 sv = pd.concat([sv0_df, sv_file])
 sv = sv.values.tolist()
-
-#%% Set up equation for the glider positions
-    # will convert to a function later
-    # function called shape_create
-    # the loop will be for multiple iterations of the same shape to add some noise and test the shape thoroughly
     
-wg_pos = np.array([])
+#%% Parameters to change for the different models
 
-for i in range(0,1):
-    wg_pos = np.append(wg_pos, shape_create(shape, rad, num_pts))
-    
-wg_pos = np.reshape(wg_pos, [int(len(wg_pos)/3), 3])
+# radius = [100, 300, 500, 1000, 1500, 1800, 2000, 2500, 3000, 4000]
+#shapes = ['circle', 'square', 'figure 8', 'spiral', 'random', 'clover']
+test_rads = np.array([100, 300, 500, 1000, 1500, 1800, 2500, 3000, 4000])
+test_shapes = ['circle', 'square', 'figure 8', 'spiral', 'random', 'clover']
 
-#%% Points of the wave glider, starting from the first point, directly north
-    # has to be changed to fit all the shapes
-    # change the bearing of the vinc
-    
-# time(no) will be the twt of the transponders for every ping
-obs_pts = len(wg_pos)
-
-# claculate bearing to each point of the
-tan_inputs = wg_pos[:, 1]/ wg_pos[:, 0]
-bearing = np.zeros(len(wg_pos))
-
-for i, tan_input in enumerate(tan_inputs):
-    if wg_pos[i, 0] > 0 and wg_pos[i, 1] > 0: # first quadrant
-        bearing[i] = 90 - (math.atan(tan_input)*180/math.pi)
+for test_shape in test_shapes:
+    for test_rad in test_rads:
+        rad = test_rad # radius of shape in meters
+        num_pts = 3000 # per shape
+        # must be divisible by 4 if using square
+        shape = test_shape # check shape create for all shapes
+        sound_model = 'harmonic mean' # bellhop or harmonic mean
+        nrun_per_shape = 1 # how many times to run that shape
+        centered_around = 'array center' # array center or transponders
+            # if centered around transponders, the number of points will be the tripled
         
-    elif wg_pos[i, 0] < 0 and wg_pos[i, 1] > 0: # second quadrant
-        bearing[i] = 270 - (math.atan(tan_input)*180/math.pi)
+        #%% Parameters that are set for all models
+            # use the data that we have gotten from the fortran benchmark for transponders positions
+            # mainly used for plotting instead of calculation
+            
+        trans1_depth = 1832.8220
+        trans2_depth = 1829.6450
+        trans3_depth = 1830.7600
         
-    elif wg_pos[i, 0] < 0 and wg_pos[i, 1] < 0: # third quadrant
-        bearing[i] = 270 - (math.atan(tan_input)*180/math.pi)
+        trans_latlong = pd.DataFrame(np.array([[44.832681360,-125.099794900],
+                                               [44.817929650,-125.126649450],
+                                               [44.842325200,-125.134820280]]), 
+                                     columns=['lat', 'lon'])
         
-    elif wg_pos[i, 0] > 0 and wg_pos[i, 1] < 0: # fourth quadrant
-        bearing[i] = 90 - (math.atan(tan_input)*180/math.pi)
-    
-    elif wg_pos[i, 0] > 0 and wg_pos[i, 1] == 0: # falls on + x axis
-        bearing[i] = 90
-        
-    elif wg_pos[i, 0] == 0 and wg_pos[i, 1] > 0: # falls on + y axis
-        bearing[i] = 0
-    
-    elif wg_pos[i, 0] < 0 and wg_pos[i, 1] == 0: # falls on - x axis
-        bearing[i] = 270
-    
-    elif wg_pos[i, 0] == 0 and wg_pos[i, 1] < 0: # falls on - y axis
-        bearing[i] = 180
-    else:
-        print('Check input')
+        center_depth = np.mean([trans1_depth, trans2_depth, trans3_depth])
         
         
-lat = np.zeros(obs_pts)
-long = np.zeros(obs_pts)
-x = np.zeros(obs_pts)
-y = np.zeros(obs_pts)
-z = np.zeros(obs_pts)
-
-for i in range(0, len(wg_pos)):
+        # center of the array lat long
+        arr_center = np.array([44.8319, -125.1204])
         
-    dist_moved = math.dist([0,0], wg_pos[i,0:2])
-    if dist_moved == 0:
-        lat[i] = 44.8319
-        long[i] = -125.1204
-    else:
-        lat[i], long[i] = vinc_pt(44.8319, -125.1204, bearing[i], dist_moved)
+        # transponder positions in xyz
+        # transponder 1,2,3 has delays, 0.2s, 0.32s and 0.44s respectively
+        trans1_x, trans1_y, trans1_z = geodetic_to_cartesian(lat = trans_latlong['lat'][0], 
+                                                             lon = trans_latlong['lon'][0],
+                                                             alt = -trans1_depth)
         
-    x[i], y[i], z[i] = geodetic_to_cartesian(lat[i], long[i], 0)
-
-wg_pos_xyz = np.transpose(np.array([x,y,z]))
-
-#%% calculate twtt for the trasnponders
-
-time1_clean = np.zeros(obs_pts)
-time2_clean = np.zeros(obs_pts)
-time3_clean = np.zeros(obs_pts)
- 
-# delay is in seconds
-delay1 = 0.2
-delay2 = 0.32
-delay3 = 0.44
-
-for i, wg in enumerate(wg_pos_xyz):
-    # distance of the glider to transponders
-    dist1 = math.dist(wg, trans1)
-    hor_dist1 = np.sqrt(dist1**2 - trans1_depth**2)
-    time1_clean[i] = 2 * twt_calc(1880, sv, hor_dist1, trans1_depth)
+        trans2_x, trans2_y, trans2_z = geodetic_to_cartesian(lat = trans_latlong['lat'][1], 
+                                                             lon = trans_latlong['lon'][1], 
+                                                             alt = -trans2_depth)
+        
+        trans3_x, trans3_y, trans3_z = geodetic_to_cartesian(lat = trans_latlong['lat'][2], 
+                                                             lon = trans_latlong['lon'][2],
+                                                             alt = -trans3_depth)
+        
+        trans1 = np.array([trans1_x, trans1_y, trans1_z])
+        trans2 = np.array([trans2_x, trans2_y, trans2_z])
+        trans3 = np.array([trans3_x, trans3_y, trans3_z])
+        
+        
+        #%% Set up equation for the glider positions
+            # will convert to a function later
+            # function called shape_create
+            # the loop will be for multiple iterations of the same shape to add some noise and test the shape thoroughly
+            
+        wg_pos = np.array([])
+        
+        if str.lower(centered_around) == 'array center':
+            for i in range(0,nrun_per_shape):
+                wg_pos = np.append(wg_pos, shape_create(shape, rad, num_pts))
+                
+            wg_pos = np.reshape(wg_pos, [int(len(wg_pos)/3), 3])
+            
+        elif str.lower(centered_around) == 'transponders':
+            for i in range(0, nrun_per_shape):
+                wg_pos = np.append(wg_pos, shape_create(shape, rad, num_pts))
+                
+            wg_pos = np.reshape(wg_pos, [int(len(wg_pos)/3), 3])
+        
+        #%% Points of the wave glider, starting from the first point, directly north
+            # has to be changed to fit all the shapes
+            # change the bearing of the vinc
+            
+        # time(no) will be the twt of the transponders for every ping
+        # will be tripled if use circles around transponders
+        obs_pts = len(wg_pos)
+        
+        # claculate bearing to each point of the
+        tan_inputs = wg_pos[:, 1]/ wg_pos[:, 0]
+        bearing = np.zeros(len(wg_pos))
+        
+        for i, tan_input in enumerate(tan_inputs):
+            if wg_pos[i, 0] > 0 and wg_pos[i, 1] > 0: # first quadrant
+                bearing[i] = 90 - (math.atan(tan_input)*180/math.pi)
+                
+            elif wg_pos[i, 0] < 0 and wg_pos[i, 1] > 0: # second quadrant
+                bearing[i] = 270 - (math.atan(tan_input)*180/math.pi)
+                
+            elif wg_pos[i, 0] < 0 and wg_pos[i, 1] < 0: # third quadrant
+                bearing[i] = 270 - (math.atan(tan_input)*180/math.pi)
+                
+            elif wg_pos[i, 0] > 0 and wg_pos[i, 1] < 0: # fourth quadrant
+                bearing[i] = 90 - (math.atan(tan_input)*180/math.pi)
+            
+            elif wg_pos[i, 0] > 0 and wg_pos[i, 1] == 0: # falls on + x axis
+                bearing[i] = 90
+                
+            elif wg_pos[i, 0] == 0 and wg_pos[i, 1] > 0: # falls on + y axis
+                bearing[i] = 0
+            
+            elif wg_pos[i, 0] < 0 and wg_pos[i, 1] == 0: # falls on - x axis
+                bearing[i] = 270
+            
+            elif wg_pos[i, 0] == 0 and wg_pos[i, 1] < 0: # falls on - y axis
+                bearing[i] = 180
+            else:
+                print('Check input')
+                
+        
+        if str.lower(centered_around) == 'array center':
+              
+            lat = np.zeros(obs_pts)
+            long = np.zeros(obs_pts)
+            x = np.zeros(obs_pts)
+            y = np.zeros(obs_pts)
+            z = np.zeros(obs_pts)
+            
+            for i in range(0, len(wg_pos)):
+                    
+                dist_moved = math.dist([0,0], wg_pos[i,0:2])
+                if dist_moved == 0:
+                    lat[i] = 44.8319
+                    long[i] = -125.1204
+                else:
+                    lat[i], long[i] = vinc_pt(44.8319, -125.1204, bearing[i], dist_moved)
+                    
+                x[i], y[i], z[i] = geodetic_to_cartesian(lat[i], long[i], 0)
+            
+            wg_pos_xyz = np.transpose(np.array([x,y,z]))
+            
+        elif str.lower(centered_around) == 'transponders':
+            
+            obs_pts = obs_pts*3
+            
+            lat = np.zeros(obs_pts)
+            long = np.zeros(obs_pts)
+            x = np.zeros(obs_pts)
+            y = np.zeros(obs_pts)
+            z = np.zeros(obs_pts)
+            
+            for j in range(0,3):
+                for i in range(0, len(wg_pos)):
+                    dist_moved = math.dist([0,0], wg_pos[i,0:2])
+                    lat[i +j*len(wg_pos)], long[i +j*len(wg_pos)] = vinc_pt(trans_latlong['lat'][j], trans_latlong['lon'][j], bearing[i], dist_moved)
+                        
+                    x[i +j*len(wg_pos)], y[i +j*len(wg_pos)], z[i +j*len(wg_pos)] = geodetic_to_cartesian(lat[i +j*len(wg_pos)], long[i +j*len(wg_pos)], 0)
+                    
+            wg_pos_xyz = np.transpose(np.array([x,y,z]))
+            
+        
+        #%% calculate twtt for the trasnponders
+        
+        time1_clean = np.zeros(obs_pts)
+        time2_clean = np.zeros(obs_pts)
+        time3_clean = np.zeros(obs_pts)
+        
+        if str.lower(sound_model) == 'bellhop':
+            for i, wg in enumerate(wg_pos_xyz):
+                # distance of the glider to transponders
+                dist1 = math.dist(wg, trans1)
+                hor_dist1 = np.sqrt(dist1**2 - trans1_depth**2)
+                time1_clean[i] = 2 * twt_calc(1880, sv, hor_dist1, trans1_depth)
+                
+                dist2 = math.dist(wg, trans2)
+                hor_dist2 = np.sqrt(dist2**2 - trans2_depth**2)
+                time2_clean[i] = 2 * twt_calc(1880, sv, hor_dist2, trans2_depth)
+                
+                dist3 = math.dist(wg, trans3)
+                hor_dist3 = np.sqrt(dist3**2 - trans3_depth**2)
+                time3_clean[i] = 2 * twt_calc(1880, sv, hor_dist3, trans2_depth)
+                
+        elif str.lower(sound_model) == 'harmonic mean':
+            sv_mean = scipy.stats.hmean(sv_file.iloc[:, 1], weights = np.repeat(4, sv_file.shape[0]))
+            time1_clean = np.zeros(obs_pts)
+            time2_clean = np.zeros(obs_pts)
+            time3_clean = np.zeros(obs_pts)
+             
+            for i, wg in enumerate(wg_pos_xyz):
+                time1_clean[i] = math.dist(wg, trans1)/sv_mean*2
+                time2_clean[i] = math.dist(wg, trans2)/sv_mean*2
+                time3_clean[i] = math.dist(wg, trans3)/sv_mean*2
+            
+            
+        #%% write twt into text file
+        # add noise and delay to the signals
+        # convert to ms for the file
+        
+        # delay is in seconds
+        delay1 = 0.2
+        delay2 = 0.32
+        delay3 = 0.44
+        
+        # convert to ms
+        time1 = (time1_clean + delay1 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
+        time2 = (time2_clean + delay2 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
+        time3 = (time3_clean + delay3 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
+        
+        time1 = time1.round()
+        time2 = time2.round()
+        time3 = time3.round()
+        
+        # Write delay into text file with times
+        # insert time from random starting point
+        
+        dates = pd.date_range(pd.Timestamp("26-JUN-23 00:00:07.00"),
+                              freq="20S", periods = obs_pts)
+        
+        dates = dates.strftime("%d-%b-%y %H:%M:%S.%f")
+        
+        # Convert time array to dataframe
+        
+        twt_df = pd.DataFrame([time1, time2, time3, dates, np.zeros(len(time1))])
+        twt_df = twt_df.T
+        
+        twt_df.columns=['t1','t2','t3','dates','dumb col']
+        twt_df = twt_df[['dates','t1','t2','t3', 'dumb col']]
+        twt_df[['t1', 't2', 't3']].map('${:,.0f}'.format)
+        
+        # twt_df.to_csv("./data/twt.txt", index=False, sep = '\t', header=False)
+        
+        twt_df_str = twt_df.to_string(formatters={'t1': '{:.d}'.format,
+                                                  't2': '{:.d}'.format,
+                                                  't3': '{:.d}'.format},
+                                      header=False, index=False)
+        
+        #open text file
+        text_file = open('./data/twt.txt', "w")
+         
+        #write string to file
+        text_file.write(twt_df_str)
+         
+        #close file
+        text_file.close()
+        
+        #%% Make the tranponder position file 
+        # needs time in j2000, XYZ, and covar 9 values
+        # covariance matrix value will be changed later. 
+        
+        start_time = 741009607.0000000
+        
+        
+        data_mat = np.array([start_time, x[0], y[0], z[0], 
+                             np.random.normal(0.000622428, 0.000671889),
+                             np.random.normal(-2.25e-07, 3.1569927543352893e-06),
+                             np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                             np.random.normal(-2.25E-07, 3.1569927543352893e-06),
+                             np.random.normal(0.000622267, 0.000671086),
+                             np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                             np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                             np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                             np.random.normal(0.000622069, 0.000670237)])
+                             
+        
+        for i, wg in enumerate(wg_pos_xyz):
+        
+            data_mat = np.append(data_mat, np.array([start_time + (time1[i]/1e6), x[i], y[i], z[i],                     np.random.normal(0.000622428, 0.000671889),
+                                 np.random.normal(-2.25e-07, 3.1569927543352893e-06),
+                                 np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                                 np.random.normal(-2.25E-07, 3.1569927543352893e-06),
+                                 np.random.normal(0.000622267, 0.000671086),
+                                 np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                                 np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                                 np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                                 np.random.normal(0.000622069, 0.000670237)]))
+            
+            data_mat = np.append(data_mat, np.array([start_time + (time2[i]/1e6), x[i], y[i], z[i], np.random.normal(0.000622428, 0.000671889),
+                                 np.random.normal(-2.25e-07, 3.1569927543352893e-06),
+                                 np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                                 np.random.normal(-2.25E-07, 3.1569927543352893e-06),
+                                 np.random.normal(0.000622267, 0.000671086),
+                                 np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                                 np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                                 np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                                 np.random.normal(0.000622069, 0.000670237)]))
+            
+            data_mat = np.append(data_mat, np.array([start_time + (time3[i]/1e6), x[i], y[i], z[i],                     np.random.normal(0.000622428, 0.000671889),
+                                 np.random.normal(-2.25e-07, 3.1569927543352893e-06),
+                                 np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                                 np.random.normal(-2.25E-07, 3.1569927543352893e-06),
+                                 np.random.normal(0.000622267, 0.000671086),
+                                 np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                                 np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                                 np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                                 np.random.normal(0.000622069, 0.000670237)]))
+            
+            start_time += 20
+            
+            if i == obs_pts - 1:
+                break
+            
+            data_mat = np.append(data_mat, np.array([start_time, x[i+1], y[i+1], z[i+1],
+                             np.random.normal(0.000622428, 0.000671889),
+                             np.random.normal(-2.25e-07, 3.1569927543352893e-06),
+                             np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                             np.random.normal(-2.25E-07, 3.1569927543352893e-06),
+                             np.random.normal(0.000622267, 0.000671086),
+                             np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                             np.random.normal(-1.96E-06, 4.312033572168257e-06),
+                             np.random.normal(-2.79E-06, 6.130817316982711e-06),
+                             np.random.normal(0.000622069, 0.000670237)]))
+        
+        
+        data_mat_1 = np.reshape(data_mat, (int(len(data_mat)/13), 13))
+        
+        # # add uncertainties to geodetic cartesian coords
+        # data_mat_1[:, 1:4] = data_mat_1[:, 1:4] + np.random.normal(
+        #     0, 0.5, size=[len(data_mat_1[:, 1:4]), 3])
+        
+        
+        wg_pos_df = pd.DataFrame(data_mat_1, columns=['Time', 'x', 'y', 'z', 'cov1', 'cov2','cov3','cov4','cov5','cov6','cov7','cov8','cov9'])
+        wg_df_str = wg_pos_df.to_string(formatters={'Time': '{:.6f}'.format,
+                                        'x': '{:.3f}'.format,
+                                        'y': '{:.3f}'.format,
+                                        'z': '{:.3f}'.format,
+                                        'cov1': '{:.10e}'.format,
+                                        'cov2': '{:.10e}'.format,
+                                        'cov3': '{:.10e}'.format,
+                                        'cov4': '{:.10e}'.format,
+                                        'cov5': '{:.10e}'.format,
+                                        'cov6': '{:.10e}'.format,
+                                        'cov7': '{:.10e}'.format,
+                                        'cov8': '{:.10e}'.format,
+                                        'cov9': '{:.10e}'.format}, header=False, index=False)
+        
+        # Save to data folder
+        
+        # wg_df.to_csv("./data/wg_pos.txt", index=False, sep=' ', header=False)
+        
+        #open text file
+        text_file = open('./data/wg_pos.txt', "w")
+         
+        #write string to file
+        text_file.write(wg_df_str)
+         
+        #close file
+        text_file.close()
+        #    data_mat = np.append(data_mat, np.array([start_time + (time3[i]/1e6), x, y, z,
+         #                        random.uniform(0.2e-3,0.8e-3),
+          #                       random.uniform(0.1e-6,0.4e-6),
+           #                      -random.uniform(0.8e-6,0.2e-5),
+            #                     random.uniform(0.1e-6,0.4e-6),
+             #                    random.uniform(0.2e-3,0.8e-3),
+              #                   -random.uniform(0.1e-5,0.4e-5),
+               #                  -random.uniform(0.8e-6,0.3e-5),
+                #                 -random.uniform(0.1e-5,0.4e-5),
+                 #                random.uniform(0.2e-3,0.8e-3)]))
+        
+        
+        #%% Plot the shapes and the figures
+        
+        plt.figure(figsize=(10,10))
+        plt.plot(long, lat, '.', markersize=5, label = 'Wave glider survey points')
+        plt.plot(trans_latlong['lon'], trans_latlong['lat'], '^', markersize=12, label = 'Seafloor transponders')
+        plt.plot(arr_center[1], arr_center[0], '.k', markersize=12, label = 'Array center')
+        plt.yticks(fontsize=13)
+        plt.xticks(fontsize=13)
+        #plt.legend(loc = 'best', fontsize = 15) #if need legend for the plots
+        fig_name = str(shape) + '_' + str(rad) + 'm_' + str(int(np.size(x)/nrun_per_shape)) + 'pts_around_' + centered_around + '.png'
+        plt.savefig('./Shape plots/'+fig_name)
+        
+        
+        
+        #%% save lat long of the data so that we can map it out in GIS software if wanted a nicer map
+        
+        # lat_long_df = pd.DataFrame([lat, long]).transpose()
+        # lat_long_df.columns = ['lat', 'long']
+        # shape_coord_file = str(shape) + '_' + str(rad) + 'm_' + str(num_pts) + 'p.csv' 
+        # lat_long_df.to_csv('C:/Users/YXAVION/Documents/GitHub/Seafloor-geodesy-URECA-wave-glider/' + shape_coord_file ,sep = ',', index = False)
+        
+        
+        #%% run command prompt gnatss from python
+        # MUST CHANGE env.txt file to your own computer env
+        
+            
+        mainPath = os.getcwd()
+        command = 'gnatss run --extract-dist-center --extract-process-dataset'
+        # distance limit and residual limit are set in the config.yaml file
+        
+        def parse_env_file(file_path):
+            env_dict = {}
+            with open(file_path, 'r') as file:
+                for line in file:
+                    line = line.strip()
+                    if line:
+                        key, value = line.split('=', 1)
+                        env_dict[key.strip()] = value.strip()
+            return env_dict
+        
+        # Example usage:
+        env_file_path = 'env.txt'
+        env_dict = parse_env_file(env_file_path)
+           
+        from subprocess import Popen, PIPE, CalledProcessError
+        
+        with Popen(command, stdout=PIPE, bufsize=1, universal_newlines=True, env = env_dict, cwd = mainPath, shell = True) as p:
+            for line in p.stdout:
+                print(line, end='') # process line here
+        
+        if p.returncode != 0:
+            raise CalledProcessError(p.returncode, p.args)
+             
+        # process = subprocess.run(command, cwd=mainPath, shell = True, env=env_dict, )
+        # print(process.args)
+        
+        #%% save results in a folder for analysis
+        
+        src_folder = 'outputs'
+        dst_folder = 'Saved outputs'
+        new_dir = str(shape) + '_' + str(rad) + 'm_' + str(int(np.size(x)/nrun_per_shape)) + 'pts_around_' + centered_around
+        
+        if os.path.exists(src_folder):
+            os.rename('outputs', new_dir)
+        
+        if os.path.exists(new_dir):
+            try:
+                shutil.move('./'+new_dir, './Saved outputs')
+            except:
+                print("Folder likely already exists in directory. Check again")
+            
+        
+        
     
-    dist2 = math.dist(wg, trans2)
-    hor_dist2 = np.sqrt(dist2**2 - trans2_depth**2)
-    time2_clean[i] = 2 * twt_calc(1880, sv, hor_dist2, trans2_depth)
-    
-    dist3 = math.dist(wg, trans3)
-    hor_dist3 = np.sqrt(dist3**2 - trans3_depth**2)
-    time3_clean[i] = 2 * twt_calc(1880, sv, hor_dist3, trans2_depth)
-    
-    
-    
-#%%
-# add noise and delay to the signals
-# convert to ms for the file
-time1 = (time1_clean + delay1 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
-time2 = (time2_clean + delay2 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
-time3 = (time3_clean + delay3 + np.random.normal(0, 0.00001, time1_clean.size))*10**6
-
-time1 = time1.round()
-time2 = time2.round()
-time3 = time3.round()
-
-# Write delay into text file with times
-# insert time from random starting point
-
-dates = pd.date_range(pd.Timestamp("26-JUN-23 00:00:07.00"),
-                      freq="20S", periods = obs_pts)
-
-dates = dates.strftime("%d-%b-%y %H:%M:%S.%f")
-
-# Convert time array to dataframe
-
-twt_df = pd.DataFrame([time1, time2, time3, dates, np.zeros(len(time1))])
-twt_df = twt_df.T
-
-twt_df.columns=['t1','t2','t3','dates','dumb col']
-twt_df = twt_df[['dates','t1','t2','t3', 'dumb col']]
-twt_df[['t1', 't2', 't3']].map('${:,.0f}'.format)
-
-# twt_df.to_csv("./data/twt.txt", index=False, sep = '\t', header=False)
-
-twt_df_str = twt_df.to_string(formatters={'t1': '{:.d}'.format,
-                                          't2': '{:.d}'.format,
-                                          't3': '{:.d}'.format},
-                              header=False, index=False)
-
-#open text file
-text_file = open('./data/twt.txt', "w")
- 
-#write string to file
-text_file.write(twt_df_str)
- 
-#close file
-text_file.close()
-
-#%% Make the tranponder position file 
-# needs time in j2000, XYZ, and covar 9 values
-# covariance matrix value will be changed later. 
-
-start_time = 741009607.0000000
-
-
-data_mat = np.array([start_time, x[0], y[0], z[0], 
-                     np.random.normal(0.000622428, 0.000671889),
-                     np.random.normal(-2.25e-07, 3.1569927543352893e-06),
-                     np.random.normal(-1.96E-06, 4.312033572168257e-06),
-                     np.random.normal(-2.25E-07, 3.1569927543352893e-06),
-                     np.random.normal(0.000622267, 0.000671086),
-                     np.random.normal(-2.79E-06, 6.130817316982711e-06),
-                     np.random.normal(-1.96E-06, 4.312033572168257e-06),
-                     np.random.normal(-2.79E-06, 6.130817316982711e-06),
-                     np.random.normal(0.000622069, 0.000670237)])
-                     
-
-for i, wg in enumerate(wg_pos):
-
-    data_mat = np.append(data_mat, np.array([start_time + (time1[i]/1e6), x[i], y[i], z[i],                     np.random.normal(0.000622428, 0.000671889),
-                         np.random.normal(-2.25e-07, 3.1569927543352893e-06),
-                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
-                         np.random.normal(-2.25E-07, 3.1569927543352893e-06),
-                         np.random.normal(0.000622267, 0.000671086),
-                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
-                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
-                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
-                         np.random.normal(0.000622069, 0.000670237)]))
-    
-    data_mat = np.append(data_mat, np.array([start_time + (time2[i]/1e6), x[i], y[i], z[i], np.random.normal(0.000622428, 0.000671889),
-                         np.random.normal(-2.25e-07, 3.1569927543352893e-06),
-                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
-                         np.random.normal(-2.25E-07, 3.1569927543352893e-06),
-                         np.random.normal(0.000622267, 0.000671086),
-                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
-                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
-                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
-                         np.random.normal(0.000622069, 0.000670237)]))
-    
-    data_mat = np.append(data_mat, np.array([start_time + (time3[i]/1e6), x[i], y[i], z[i],                     np.random.normal(0.000622428, 0.000671889),
-                         np.random.normal(-2.25e-07, 3.1569927543352893e-06),
-                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
-                         np.random.normal(-2.25E-07, 3.1569927543352893e-06),
-                         np.random.normal(0.000622267, 0.000671086),
-                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
-                         np.random.normal(-1.96E-06, 4.312033572168257e-06),
-                         np.random.normal(-2.79E-06, 6.130817316982711e-06),
-                         np.random.normal(0.000622069, 0.000670237)]))
-    
-    start_time += 20
-    
-    if i == obs_pts - 1:
-        break
-    
-    data_mat = np.append(data_mat, np.array([start_time, x[i+1], y[i+1], z[i+1],
-                     np.random.normal(0.000622428, 0.000671889),
-                     np.random.normal(-2.25e-07, 3.1569927543352893e-06),
-                     np.random.normal(-1.96E-06, 4.312033572168257e-06),
-                     np.random.normal(-2.25E-07, 3.1569927543352893e-06),
-                     np.random.normal(0.000622267, 0.000671086),
-                     np.random.normal(-2.79E-06, 6.130817316982711e-06),
-                     np.random.normal(-1.96E-06, 4.312033572168257e-06),
-                     np.random.normal(-2.79E-06, 6.130817316982711e-06),
-                     np.random.normal(0.000622069, 0.000670237)]))
-
-
-data_mat_1 = np.reshape(data_mat, (int(len(data_mat)/13), 13))
-
-# # add uncertainties to geodetic cartesian coords
-# data_mat_1[:, 1:4] = data_mat_1[:, 1:4] + np.random.normal(
-#     0, 0.5, size=[len(data_mat_1[:, 1:4]), 3])
-
-
-wg_pos_df = pd.DataFrame(data_mat_1, columns=['Time', 'x', 'y', 'z', 'cov1', 'cov2','cov3','cov4','cov5','cov6','cov7','cov8','cov9'])
-wg_df_str = wg_pos_df.to_string(formatters={'Time': '{:.6f}'.format,
-                                'x': '{:.3f}'.format,
-                                'y': '{:.3f}'.format,
-                                'z': '{:.3f}'.format,
-                                'cov1': '{:.10e}'.format,
-                                'cov2': '{:.10e}'.format,
-                                'cov3': '{:.10e}'.format,
-                                'cov4': '{:.10e}'.format,
-                                'cov5': '{:.10e}'.format,
-                                'cov6': '{:.10e}'.format,
-                                'cov7': '{:.10e}'.format,
-                                'cov8': '{:.10e}'.format,
-                                'cov9': '{:.10e}'.format}, header=False, index=False)
-
-# import io   
-
-# wg_df = pd.read_csv(io.StringIO(wg_df_str), delim_whitespace=True)
-
-
-#wg_pos_df['dumb column'] = '   '
-#wg_pos_df = wg_pos_df[['dumb column',0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]]
-
-#%% Save to data folder
-
-# wg_df.to_csv("./data/wg_pos.txt", index=False, sep=' ', header=False)
-
-#open text file
-text_file = open(r'C:\Users\YXAVION\Documents\GitHub\Seafloor-geodesy-URECA-wave-glider\data\wg_pos.txt', "w")
- 
-#write string to file
-text_file.write(wg_df_str)
- 
-#close file
-text_file.close()
-#    data_mat = np.append(data_mat, np.array([start_time + (time3[i]/1e6), x, y, z,
- #                        random.uniform(0.2e-3,0.8e-3),
-  #                       random.uniform(0.1e-6,0.4e-6),
-   #                      -random.uniform(0.8e-6,0.2e-5),
-    #                     random.uniform(0.1e-6,0.4e-6),
-     #                    random.uniform(0.2e-3,0.8e-3),
-      #                   -random.uniform(0.1e-5,0.4e-5),
-       #                  -random.uniform(0.8e-6,0.3e-5),
-        #                 -random.uniform(0.1e-5,0.4e-5),
-         #                random.uniform(0.2e-3,0.8e-3)]))
-
-#%% save lat long of the data so that we can map it out
-
-plt.figure()
-plt.plot(long, lat, '.')
-plt.plot([-125.134820280,-125.126649450, -125.099794900, -125.1204],[44.842325200, 44.817929650, 44.832681360, 44.8319], '.')
-
-array_pts = pd.DataFrame([[-125.134820280,-125.126649450, -125.099794900, -125.1204],[44.842325200, 44.817929650, 44.832681360, 44.8319]]).transpose()
-array_pts.columns = ['long', 'lat']
-lat_long_df = pd.DataFrame([lat, long]).transpose()
-lat_long_df.columns = ['lat', 'long']
-shape_coord_file = str(shape) + '_' + str(rad) + 'm_' + str(num_pts) + 'p.csv' 
-lat_long_df.to_csv('C:/Users/YXAVION/Documents/GitHub/Seafloor-geodesy-URECA-wave-glider/' + shape_coord_file ,sep = ',', index = False)
-# array_pts.to_csv(r'C:/Users/YXAVION/Documents/GitHub/Seafloor-geodesy-URECA-wave-glider/array_lat_long.csv',sep = ',', index = False)
