@@ -6,8 +6,6 @@ Created on Thu Jan 11 14:51:18 2024
 """
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib_inline
-import matplotlib
 import numpy as np
 import math
 import pyproj
@@ -21,6 +19,9 @@ def warn(*args, **kwargs):
     pass
 import warnings
 warnings.warn = warn
+
+# set working directory
+os.chdir(r'C:\Users\YXAVION\Documents\GitHub\Seafloor-geodesy-URECA-wave-glider')
 
 #%% defining functions lat lon to xyz and vincenty forward equation for WGS84
 #### have to create func to get points for a certain shape
@@ -405,7 +406,7 @@ sv = sv.values.tolist()
 
 # radius = [100, 300, 500, 1000, 1500, 1800, 2000, 2500, 3000, 4000]
 #shapes = ['circle', 'square', 'figure 8', 'spiral', 'random', 'clover']
-test_rads = np.array([100, 300, 500, 1000, 1500, 1800, 2500, 3000, 4000])
+test_rads = np.array([100, 300, 500, 1000, 1500, 1800, 2000, 2500, 3000, 4000])
 test_shapes = ['circle', 'square', 'figure 8', 'spiral', 'random', 'clover']
 
 for test_shape in test_shapes:
@@ -427,9 +428,9 @@ for test_shape in test_shapes:
         trans2_depth = 1829.6450
         trans3_depth = 1830.7600
         
-        trans_latlong = pd.DataFrame(np.array([[44.832681360,-125.099794900],
-                                               [44.817929650,-125.126649450],
-                                               [44.842325200,-125.134820280]]), 
+        trans_latlong = pd.DataFrame(np.array([[44.832681360,-125.099794900], # 1.1
+                                               [44.817929650,-125.126649450], #1.2
+                                               [44.842325200,-125.134820280]]), #1.3
                                      columns=['lat', 'lon'])
         
         center_depth = np.mean([trans1_depth, trans2_depth, trans3_depth])
@@ -557,7 +558,7 @@ for test_shape in test_shapes:
             wg_pos_xyz = np.transpose(np.array([x,y,z]))
             
         
-        #%% calculate twtt for the trasnponders
+        #%% calculate twtt for the transponders
         
         time1_clean = np.zeros(obs_pts)
         time2_clean = np.zeros(obs_pts)
@@ -647,7 +648,7 @@ for test_shape in test_shapes:
         
         start_time = 741009607.0000000
         
-        
+        np.random.seed(45)
         data_mat = np.array([start_time, x[0], y[0], z[0], 
                              np.random.normal(0.000622428, 0.000671889),
                              np.random.normal(-2.25e-07, 3.1569927543352893e-06),
@@ -763,7 +764,7 @@ for test_shape in test_shapes:
         plt.plot(arr_center[1], arr_center[0], '.k', markersize=12, label = 'Array center')
         plt.yticks(fontsize=13)
         plt.xticks(fontsize=13)
-        #plt.legend(loc = 'best', fontsize = 15) #if need legend for the plots
+        plt.legend(loc = 'upper right', fontsize = 15) #if need legend for the plots
         fig_name = str(shape) + '_' + str(rad) + 'm_' + str(int(np.size(x)/nrun_per_shape)) + 'pts_around_' + centered_around + '.png'
         plt.savefig('./Shape plots/'+fig_name)
         
@@ -781,50 +782,50 @@ for test_shape in test_shapes:
         # MUST CHANGE env.txt file to your own computer env
         
             
-        mainPath = os.getcwd()
-        command = 'gnatss run --extract-dist-center --extract-process-dataset'
-        # distance limit and residual limit are set in the config.yaml file
+        # mainPath = os.getcwd()
+        # command = 'gnatss run --extract-dist-center --extract-process-dataset'
+        # # distance limit and residual limit are set in the config.yaml file
         
-        def parse_env_file(file_path):
-            env_dict = {}
-            with open(file_path, 'r') as file:
-                for line in file:
-                    line = line.strip()
-                    if line:
-                        key, value = line.split('=', 1)
-                        env_dict[key.strip()] = value.strip()
-            return env_dict
+        # def parse_env_file(file_path):
+        #     env_dict = {}
+        #     with open(file_path, 'r') as file:
+        #         for line in file:
+        #             line = line.strip()
+        #             if line:
+        #                 key, value = line.split('=', 1)
+        #                 env_dict[key.strip()] = value.strip()
+        #     return env_dict
         
-        # Example usage:
-        env_file_path = 'env.txt'
-        env_dict = parse_env_file(env_file_path)
+        # # Example usage:
+        # env_file_path = 'env.txt'
+        # env_dict = parse_env_file(env_file_path)
            
-        from subprocess import Popen, PIPE, CalledProcessError
+        # from subprocess import Popen, PIPE, CalledProcessError
         
-        with Popen(command, stdout=PIPE, bufsize=1, universal_newlines=True, env = env_dict, cwd = mainPath, shell = True) as p:
-            for line in p.stdout:
-                print(line, end='') # process line here
+        # with Popen(command, stdout=PIPE, bufsize=1, universal_newlines=True, env = env_dict, cwd = mainPath, shell = True) as p:
+        #     for line in p.stdout:
+        #         print(line, end='') # process line here
         
-        if p.returncode != 0:
-            raise CalledProcessError(p.returncode, p.args)
+        # if p.returncode != 0:
+        #     raise CalledProcessError(p.returncode, p.args)
              
-        # process = subprocess.run(command, cwd=mainPath, shell = True, env=env_dict, )
-        # print(process.args)
+        # # process = subprocess.run(command, cwd=mainPath, shell = True, env=env_dict, )
+        # # print(process.args)
         
         #%% save results in a folder for analysis
         
-        src_folder = 'outputs'
-        dst_folder = 'Saved outputs'
-        new_dir = str(shape) + '_' + str(rad) + 'm_' + str(int(np.size(x)/nrun_per_shape)) + 'pts_around_' + centered_around
+        # src_folder = 'outputs'
+        # dst_folder = 'Saved outputs'
+        # new_dir = str(shape) + '_' + str(rad) + 'm_' + str(int(np.size(x)/nrun_per_shape)) + 'pts_around_' + centered_around
         
-        if os.path.exists(src_folder):
-            os.rename('outputs', new_dir)
+        # if os.path.exists(src_folder):
+        #     os.rename('outputs', new_dir)
         
-        if os.path.exists(new_dir):
-            try:
-                shutil.move('./'+new_dir, './Saved outputs')
-            except:
-                print("Folder likely already exists in directory. Check again")
+        # if os.path.exists(new_dir):
+        #     try:
+        #         shutil.move('./'+new_dir, './Saved outputs')
+        #     except:
+        #         print("Folder likely already exists in directory. Check again")
             
         
         
