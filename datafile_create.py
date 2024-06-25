@@ -376,8 +376,8 @@ def twt_calc(seafloor_depth, soundspeed, horizontal_dist, trans_depth):
         tx_depth = 0.0001, # default wave glider transmission depth,
         rx_depth = trans_depth,
         rx_range = horizontal_dist, 
-        max_angle = 89.999, 
-        min_angle = 15
+        max_angle = 60, # straight down angle
+        min_angle = 30
     )
     
     arrivals = pm.compute_arrivals(env)
@@ -406,17 +406,17 @@ sv = sv.values.tolist()
 
 # radius = [100, 300, 500, 1000, 1500, 1800, 2000, 2500, 3000, 4000]
 #shapes = ['circle', 'square', 'figure 8', 'spiral', 'random', 'clover']
-test_rads = np.array([100, 300, 500, 1000, 1500, 1800, 2000, 2500, 3000, 4000])
-test_shapes = ['circle', 'square', 'figure 8', 'spiral', 'random', 'clover']
+test_rads = np.array([100, 300, 500])
+test_shapes = ['circle']
 
 for test_shape in test_shapes:
     for test_rad in test_rads:
         rad = test_rad # radius of shape in meters
-        num_pts = 3000 # per shape
+        num_pts = 500 # per shape
         # must be divisible by 4 if using square
         shape = test_shape # check shape create for all shapes
-        sound_model = 'harmonic mean' # bellhop or harmonic mean
-        nrun_per_shape = 1 # how many times to run that shape
+        sound_model = 'bellhop' # bellhop or harmonic mean
+        nrun_per_shape = 3 # how many times to run that shape
         centered_around = 'array center' # array center or transponders
             # if centered around transponders, the number of points will be the tripled
         
@@ -578,6 +578,9 @@ for test_shape in test_shapes:
                 dist3 = math.dist(wg, trans3)
                 hor_dist3 = np.sqrt(dist3**2 - trans3_depth**2)
                 time3_clean[i] = 2 * twt_calc(1880, sv, hor_dist3, trans2_depth)
+                
+                # print the iteration so that can track progress
+                print(i)
                 
         elif str.lower(sound_model) == 'harmonic mean':
             sv_mean = scipy.stats.hmean(sv_file.iloc[:, 1], weights = np.repeat(4, sv_file.shape[0]))
@@ -758,15 +761,15 @@ for test_shape in test_shapes:
         
         #%% Plot the shapes and the figures
         
-        plt.figure(figsize=(10,10))
-        plt.plot(long, lat, '.', markersize=5, label = 'Wave glider survey points')
-        plt.plot(trans_latlong['lon'], trans_latlong['lat'], '^', markersize=12, label = 'Seafloor transponders')
-        plt.plot(arr_center[1], arr_center[0], '.k', markersize=12, label = 'Array center')
-        plt.yticks(fontsize=13)
-        plt.xticks(fontsize=13)
-        plt.legend(loc = 'upper right', fontsize = 15) #if need legend for the plots
-        fig_name = str(shape) + '_' + str(rad) + 'm_' + str(int(np.size(x)/nrun_per_shape)) + 'pts_around_' + centered_around + '.png'
-        plt.savefig('./Shape plots/'+fig_name)
+        # plt.figure(figsize=(10,10))
+        # plt.plot(long, lat, '.', markersize=5, label = 'Wave glider survey points')
+        # plt.plot(trans_latlong['lon'], trans_latlong['lat'], '^', markersize=12, label = 'Seafloor transponders')
+        # plt.plot(arr_center[1], arr_center[0], '.k', markersize=12, label = 'Array center')
+        # plt.yticks(fontsize=13)
+        # plt.xticks(fontsize=13)
+        # plt.legend(loc = 'upper right', fontsize = 15) #if need legend for the plots
+        # fig_name = str(shape) + '_' + str(rad) + 'm_' + str(int(np.size(x)/nrun_per_shape)) + 'pts_around_' + centered_around + '.png'
+        # plt.savefig('./Shape plots/'+fig_name)
         
         
         
@@ -781,51 +784,50 @@ for test_shape in test_shapes:
         #%% run command prompt gnatss from python
         # MUST CHANGE env.txt file to your own computer env
         
-            
-        # mainPath = os.getcwd()
-        # command = 'gnatss run --extract-dist-center --extract-process-dataset'
-        # # distance limit and residual limit are set in the config.yaml file
+        mainPath = os.getcwd()
+        command = 'gnatss run --extract-dist-center --extract-process-dataset'
+        # distance limit and residual limit are set in the config.yaml file
         
-        # def parse_env_file(file_path):
-        #     env_dict = {}
-        #     with open(file_path, 'r') as file:
-        #         for line in file:
-        #             line = line.strip()
-        #             if line:
-        #                 key, value = line.split('=', 1)
-        #                 env_dict[key.strip()] = value.strip()
-        #     return env_dict
+        def parse_env_file(file_path):
+            env_dict = {}
+            with open(file_path, 'r') as file:
+                for line in file:
+                    line = line.strip()
+                    if line:
+                        key, value = line.split('=', 1)
+                        env_dict[key.strip()] = value.strip()
+            return env_dict
         
-        # # Example usage:
-        # env_file_path = 'env.txt'
-        # env_dict = parse_env_file(env_file_path)
+        # Example usage:
+        env_file_path = 'env.txt'
+        env_dict = parse_env_file(env_file_path)
            
-        # from subprocess import Popen, PIPE, CalledProcessError
+        from subprocess import Popen, PIPE, CalledProcessError
         
-        # with Popen(command, stdout=PIPE, bufsize=1, universal_newlines=True, env = env_dict, cwd = mainPath, shell = True) as p:
-        #     for line in p.stdout:
-        #         print(line, end='') # process line here
+        with Popen(command, stdout=PIPE, bufsize=1, universal_newlines=True, env = env_dict, cwd = mainPath, shell = True) as p:
+            for line in p.stdout:
+                print(line, end='') # process line here
         
-        # if p.returncode != 0:
-        #     raise CalledProcessError(p.returncode, p.args)
+        if p.returncode != 0:
+            raise CalledProcessError(p.returncode, p.args)
              
-        # # process = subprocess.run(command, cwd=mainPath, shell = True, env=env_dict, )
-        # # print(process.args)
+        # process = subprocess.run(command, cwd=mainPath, shell = True, env=env_dict, )
+        # print(process.args)
         
         #%% save results in a folder for analysis
         
-        # src_folder = 'outputs'
-        # dst_folder = 'Saved outputs'
-        # new_dir = str(shape) + '_' + str(rad) + 'm_' + str(int(np.size(x)/nrun_per_shape)) + 'pts_around_' + centered_around
+        src_folder = 'outputs'
+        dst_folder = 'Saved outputs'
+        new_dir = str(shape) + '_' + str(rad) + 'm_' + str(int(np.size(x)/nrun_per_shape)) + 'pts_around_' + centered_around
         
-        # if os.path.exists(src_folder):
-        #     os.rename('outputs', new_dir)
+        if os.path.exists(src_folder):
+            os.rename('outputs', new_dir)
         
-        # if os.path.exists(new_dir):
-        #     try:
-        #         shutil.move('./'+new_dir, './Saved outputs')
-        #     except:
-        #         print("Folder likely already exists in directory. Check again")
+        if os.path.exists(new_dir):
+            try:
+                shutil.move('./'+new_dir, './Saved outputs')
+            except:
+                print("Folder likely already exists in directory. Check again")
             
         
         
