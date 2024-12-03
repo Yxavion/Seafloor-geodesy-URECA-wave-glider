@@ -321,7 +321,7 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
         
         t = np.linspace(0, 2*np.pi, num = num_pts)
             
-        wg_pos = np.transpose(np.array([rad * np.sin(t), rad * np.cos(t), np.repeat(-4, num_pts)]))
+        wg_pos = np.transpose(np.array([rad * np.sin(t), rad * np.cos(t), np.repeat(0, num_pts)]))
         
         plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
     
@@ -455,7 +455,7 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
                  
             plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
 
-# Final output
+    # Final output
     return wg_pos
 
 #%% sound speed profile
@@ -473,15 +473,21 @@ sv0_df = pd.DataFrame(np.array([0, sv0])).transpose()
 sv = pd.concat([sv0_df, sv_file])
 sv = sv.values.tolist()
 
+# save sound velocity as a .csv for garpos
+sv_df = pd.DataFrame(sv, columns=['depth', 'speed'])
+sv_df.to_csv('./data/sv.csv', index=False)
+
+
 #%% Parameters set for the different models
 
 # radius = [100, 300, 500, 1000, 1500, 1800, 2000, 2500, 3000, 4000]
 #shapes = ['circle', 'square', 'figure 8', 'spiral', 'random', 'clover']
 
-test_rads = np.array([100, 300, 500]) # test radius
+test_rads = np.array([500]) # test radius
 test_shapes = ['circle'] # test shapes
 glider_speed = 0.1 # in m/s
 time_btw_pings = 30 # time between the pings in sec
+sound_model = 'harmonic mean' # bellhop or harmonic mean
 
 # number of times to loop the shapes to get an average of the residuals
 nrun_per_shape = 3 # how many times to run that shape
@@ -508,13 +514,16 @@ trans_pos = pd.DataFrame(np.array([[44.832681360 ,-125.099794900, -1832.8220], #
 arr_center_pos = trans_pos.mean()
 
 # aribituary point set to somewhere above array center in lat long and height
-# gnatss config file seems to be 
 arb_pt = np.array([44.8309, -125.1204, 20])
 
 # convert to ENU using pymap3d
 # defualt ellipsoid is wgs84
+# first series will be E then N then U
 trans_pos_ENU = pymap3d.geodetic2enu(trans_pos['lat'], trans_pos['long'], trans_pos['height'], arb_pt[0], arb_pt[1], arb_pt[2])
 arr_center_ENU = pymap3d.geodetic2enu(arr_center_pos['lat'], arr_center_pos['long'], arr_center_pos['height'], arb_pt[0], arb_pt[1], arb_pt[2])
+
+# convert trans_pos_ENU to a pandas dataframe
+transponder_pos_ENU = pd.DataFrame({'E': trans_pos_ENU[0], 'N': trans_pos_ENU[1], 'U': trans_pos_ENU[2]})
 
 #%% Find wave glider ping locations in ENU
 for i, shape_obs in shapes_obs.iterrows():
@@ -522,5 +531,202 @@ for i, shape_obs in shapes_obs.iterrows():
     # get the antennae positions when the glider pings for a shape
     wg_ping_pos = shape_create(shape_obs['Shape'], shape_obs['Radius'], int(shape_obs['Number of observations']))
 
+    # get the glider receiving positions
+    # change this a function later
+    '''# for now just put the same positions as the ping positions'''
     
+    wg_receive_pos1 = wg_ping_pos
+    wg_receive_pos2 = wg_ping_pos
+    wg_receive_pos3 = wg_ping_pos
+    
+    # combine the wave glider receive positions into one long array
+    wg_receive_pos = np.concatenate([wg_receive_pos1, wg_receive_pos2, wg_receive_pos3], axis=1).reshape((len(wg_receive_pos1)*3, 3))
+    
+    # roll, pitch, yaw (heading)for ping positions
+    # have to repeat array by 3 later using np.repeat as the 3 ping positions will the same
+    roll_ping = np.random.normal(0, 2, int(shape_obs['Number of observations']))
+    pitch_ping = np.random.normal(0, 2, int(shape_obs['Number of observations']))
+    yaw_ping = np.random.normal(0, 2, int(shape_obs['Number of observations']))
+    
+    # roll pitch yaw for receiving
+    roll_receive = np.random.normal(0, 2, int(shape_obs['Number of observations']*3))
+    pitch_receive = np.random.normal(0, 2, int(shape_obs['Number of observations']*3))
+    yaw_receive = np.random.normal(0, 2, int(shape_obs['Number of observations']*3))
+    
+    #%% From antennae to transducer position
+    ''''check https://www.frontiersin.org/journals/earth-science/articles/10.3389/feart.2020.597532/full for the conversion of antennae position to transducer position'''
+    
+    # ATD offset labelled M (from config file in fortran benchmark)
+    M = np.asmatrix('0.0053 ; 0 ; 0.92813')
+    
+    # This will be the transducer position when the glider pings
+    # temporary file that will be repeated by 3 times later after the loop
+    transducer_ping_pos1 = np.zeros([len(wg_ping_pos), 3])
+    
+    for j in range(0, len(roll_ping)): 
+        
+        # rotation matrix should be R = R4 * R3 * R2 * R1, matrix multiplication
+        # this will be for the ping positions
+        R4 = np.array(np.asmatrix('0 1 0; 1 0 0; 0 0 -1')) # final rotation
+        R3 = np.array([[np.cos(np.radians(yaw_ping[j])), -np.sin(np.radians(yaw_ping[j])),0],
+                       [np.sin(np.radians(yaw_ping[j])), np.cos(np.radians(yaw_ping[j])),0],
+                       [0, 0, 1]]) # yaw / heading rotation
+        
+        R2 = np.array([[np.cos(np.radians(pitch_ping[j])),0, np.sin(np.radians(pitch_ping[j]))], 
+                       [0, 1, 0],
+                       [-np.sin(np.radians(pitch_ping[j])),0, np.cos(np.radians(pitch_ping[j]))]]) # pitch rotation
+        
+        R1 = np.array([[1, 0, 0], 
+                       [0, np.cos(np.radians(roll_ping[j])), -np.sin(np.radians(roll_ping[j]))], 
+                       [0, np.sin(np.radians(roll_ping[j])), np.cos(np.radians(roll_ping[j]))]])
+        
+        R = R4 @ R3 @ R2 @ R1 # matrix multiplication for final rotation matrix
+        
+        # This will be the offset of the different ENU data for the positions
+        RM = R @ M 
+        
+        ##### This has to be repeated 3 times when making the data input file
+        transducer_ping_pos1[j,] = np.transpose(np.transpose(np.asmatrix(wg_ping_pos[j,])) + RM)
+        
+    # repeat this 3 times to make the sending ping all the same for the 3 transponders
+    transducer_ping_pos = np.repeat(transducer_ping_pos1, 3, axis=0)
+    
+    # This will be the transducer position for when the glider receives back the signal
+    transducer_receive_pos = np.zeros([len(wg_receive_pos), 3])
+        
+    for j in range(0, len(roll_receive)):
+        
+        # rotation matrix should be R = R4 * R3 * R2 * R1, matrix multiplication
+        # this will be for the ping positions
+        R4 = np.array(np.asmatrix('0 1 0; 1 0 0; 0 0 -1')) # final rotation
+        R3 = np.array([[np.cos(np.radians(yaw_receive[j])), -np.sin(np.radians(yaw_receive[j])),0],
+                       [np.sin(np.radians(yaw_receive[j])), np.cos(np.radians(yaw_receive[j])),0],
+                       [0, 0, 1]]) # yaw / heading rotation
+        
+        R2 = np.array([[np.cos(np.radians(pitch_receive[j])),0, np.sin(np.radians(pitch_receive[j]))], 
+                       [0, 1, 0],
+                       [-np.sin(np.radians(pitch_receive[j])),0, np.cos(np.radians(pitch_receive[j]))]]) # pitch rotation
+        
+        R1 = np.array([[1, 0, 0], 
+                       [0, np.cos(np.radians(roll_receive[j])), -np.sin(np.radians(roll_receive[j]))], 
+                       [0, np.sin(np.radians(roll_receive[j])), np.cos(np.radians(roll_receive[j]))]])
+        
+        R = R4 @ R3 @ R2 @ R1 # matrix multiplication for final rotation matrix
+        
+        # This will be the offset of the different ENU data for the different positions
+        RM = R @ M 
+        
+        transducer_receive_pos[j,] = np.transpose(np.transpose(np.asmatrix(wg_receive_pos[j,])) + RM)
+        
+    #%% Two way travel time calculations
+
+    # for now will just use harmonic mean of the sound speed
+    twt_send = np.zeros(np.size(yaw_receive))
+    twt_receive = np.zeros(np.size(yaw_receive))
+    
+    for i in range(0, int(len(transducer_ping_pos[:, 1])/3)): 
+        
+        if str.lower(sound_model) == 'harmonic mean':
+            
+            # distance in m for the ping positions between tranducer and transponder
+            wg_transponder_dist_ping1 = np.linalg.norm(transducer_ping_pos[i*3,:] - transponder_pos_ENU.iloc[0])
+            wg_transponder_dist_ping2 = np.linalg.norm(transducer_ping_pos[(i*3) + 1,:] - transponder_pos_ENU.iloc[1])
+            wg_transponder_dist_ping3 = np.linalg.norm(transducer_ping_pos[(i*3) + 2,:] - transponder_pos_ENU.iloc[2])
+            
+            # harmonic mean speed
+            sv_mean = scipy.stats.hmean(sv_file.iloc[:, 1], weights = np.repeat(4, sv_file.shape[0]))
+            
+            # get the travel time for the sending of the ping in sec
+            # add this to twt_receive later 
+            twt_send[i*3] = wg_transponder_dist_ping1 / sv_mean
+            twt_send[i*3 + 1] = wg_transponder_dist_ping2 / sv_mean
+            twt_send[i*3 + 2] = wg_transponder_dist_ping3 / sv_mean
+            
+            # distance in m for the receive positions between transducer and transponder
+            wg_transponder_dist_receive1 = np.linalg.norm(transducer_receive_pos[i*3,:] - transponder_pos_ENU.iloc[0])
+            wg_transponder_dist_receive2 = np.linalg.norm(transducer_receive_pos[(i*3) + 1,:] - transponder_pos_ENU.iloc[1])
+            wg_transponder_dist_receive3 = np.linalg.norm(transducer_receive_pos[(i*3) + 2,:] - transponder_pos_ENU.iloc[2])
+            
+            # travel time for receiving back the ping in sec
+            # garpos does not require delay timings in the twt
+            twt_receive[i*3] = wg_transponder_dist_receive1 / sv_mean #+ 0.2
+            twt_receive[i*3 + 1] = wg_transponder_dist_receive2 / sv_mean #+ 0.32
+            twt_receive[i*3 + 2] = wg_transponder_dist_receive3 / sv_mean #+ 0.44
+            
+    twt = twt_receive + twt_send
+            
+    #%% Create the datafile to run in garpos
+    
+    # seconds from 12am of the julian date set in the config file
+    start_time = 1000
+    
+    # sending times 
+    sending_time = start_time + np.arange(0, len(wg_ping_pos) * time_btw_pings, time_btw_pings)
+    ST = np.repeat(sending_time, 3) # used in the final
+    
+    # receiving times
+    RT = ST + twt
+    
+    # final array will be 
+    # SET	LN	MT	TT	ResiTT	TakeOff	gamma	flag	ST	ant_e0	ant_n0	ant_u0	head0	pitch0	roll0	RT	ant_e1	ant_n1	ant_u1	head1	pitch1	roll1
+    
+    # values that are mostly constant or does not really matter
+    Set = pd.DataFrame({'SET': ['S01'] * len(twt)})
+    LN = pd.DataFrame({'LN': ['L01'] * len(twt)})
+    MT = pd.DataFrame({'MT': ["M11", "M12", "M13"] * len(sending_time)})
+    TT = pd.DataFrame({'TT': twt})
+    ResiTT = pd.DataFrame({'ResiTT': np.zeros(len(twt))})
+    takeoff = pd.DataFrame({'TakeOff': np.zeros(len(twt))})
+    gamma = pd.DataFrame({'gamma': np.zeros(len(twt))})
+    flag = pd.DataFrame({'flag':  ['FALSE'] * len(twt)})
+    
+    # ST which is the pings (sending)
+    ant_e0 = pd.DataFrame({'ant_e0': np.repeat(wg_ping_pos[:,0],3)})
+    ant_n0 = pd.DataFrame({'ant_n0': np.repeat(wg_ping_pos[:,1],3)})
+    ant_u0 = pd.DataFrame({'ant_u0': np.repeat(wg_ping_pos[:,2],3)})
+    
+    head0 = pd.DataFrame({'head0': np.repeat(yaw_ping ,3)})
+    pitch0 = pd.DataFrame({'pitch0': np.repeat(pitch_ping ,3)})
+    roll0 = pd.DataFrame({'roll0': np.repeat(roll_ping ,3)})
+    
+    #RT which is the receiving of pings
+    ant_e1 = pd.DataFrame({'ant_e1': wg_receive_pos[:,0]})
+    ant_n1 = pd.DataFrame({'ant_n1': wg_receive_pos[:,1]})
+    ant_u1 = pd.DataFrame({'ant_u1': wg_receive_pos[:,2]})
+    
+    head1 = pd.DataFrame({'head1': yaw_receive})
+    pitch1 = pd.DataFrame({'pitch1': pitch_receive})
+    roll1 = pd.DataFrame({'roll1': roll_receive})
+    
+    #%% C'ombine all dataframes together
+    
+    final_data = pd.concat([Set, LN, MT, TT, ResiTT, takeoff, gamma, flag, pd.DataFrame({'ST': ST}), ant_e0, ant_n0, ant_u0, head0, pitch0, roll0, pd.DataFrame({'RT': RT}), ant_e1, ant_n1, ant_u1, head1, pitch1, roll1], axis=1)
+    
+    final_data.to_csv('./data/output.csv')
+
+    
+    
+    
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     

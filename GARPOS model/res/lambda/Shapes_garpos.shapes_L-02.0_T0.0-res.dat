@@ -1,0 +1,38 @@
+[Obs-parameter] 
+ Site_name   = Shapes_garpos
+ Campaign    = shapes
+ Date(UTC)   = 2019-03-15
+ Date(jday)  = 2019-074
+ Ref.Frame   = ITRF2014
+ SoundSpeed  = ./data/sv.csv
+
+[Data-file]
+ datacsv     = res//lambda/Shapes_garpos.shapes_L-02.0_T0.0-obs.csv
+ N_shot      =  3141
+ used_shot   =  3141
+
+[Site-parameter]
+ Latitude0   =  44.83090000
+ Longitude0  = -125.12040000
+ Height0     =  20.00
+ Stations    = M11 M12 M13
+# Array_cent :   'cntpos_E'  'cntpos_N'  'cntpos_U'
+ Center_ENU  =     -1.6817      8.8567  -1851.2722
+
+[Model-parameter]
+# MT_Pos     :   'stapos_E'  'stapos_N'  'stapos_U'   'sigma_E'   'sigma_N'   'sigma_U'   'cov_NU'    'cov_UE'    'cov_EN'
+ M11_dPos    =   1628.9029    198.1089  -1853.0209      0.0017      0.0004      0.0004  -6.507e-08  -4.867e-07   3.611e-07
+ M12_dPos    =   -494.1663  -1440.9423  -1849.8190      0.0006      0.0016      0.0005   6.686e-07   2.264e-07   9.051e-07
+ M13_dPos    =  -1139.7817   1269.4034  -1850.9767      0.0012      0.0013      0.0004  -2.671e-07   2.537e-07  -1.503e-06
+ dCentPos    =      0.0000      0.0000      0.0000      0.0000      0.0000      0.0000   0.000e+00   0.000e+00   0.000e+00
+# ANT_to_TD  :    'forward' 'rightward'  'downward'   'sigma_F'   'sigma_R'   'sigma_D'   'cov_RD'    'cov_DF'    'cov_FR'
+ ATDoffset   =      0.0053      0.0000      0.9281      0.0000      0.0000      0.0000   0.000e+00   0.000e+00   0.000e+00
+
+#Inversion loop 001, RMS(TT) =   0.000029 ms, used_shot = 100.0%, reject =    0, Max(dX) =     0.2849, Hgt =  -1851.272
+#Inversion loop 002, RMS(TT) =   0.000029 ms, used_shot = 100.0%, reject =    0, Max(dX) =     0.0002, Hgt =  -1851.272
+#Inversion loop 003, RMS(TT) =   0.000029 ms, used_shot = 100.0%, reject =    0, Max(dX) =     0.0002, Hgt =  -1851.272
+#  ABIC =      -23041.835384  misfit =  0.000 _L-02.0_T0.0
+# lambda_0^2 =   0.01000000
+# lambda_g^2 =   0.00100000
+# mu_t =   0.00000000 sec.
+# mu_MT = 0.5000
