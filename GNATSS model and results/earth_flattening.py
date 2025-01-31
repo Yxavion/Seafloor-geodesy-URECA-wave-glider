@@ -24,7 +24,6 @@ def eccentricity(a,b):
 def R_G(phi, a = 6378137.000, b = 6356752.3):
     """
     Implements equations in "Acoustic Ray-Trace Equations for Seafloor Geodesy" by Chadwell and Sweeney
-    
     to obtain the radius of the spherical Earth model which is the Gaussian mean radius of curvature, 
     that can then be used to do an Earth-flattening transform for seafloor geodesy.
     
@@ -34,7 +33,7 @@ def R_G(phi, a = 6378137.000, b = 6356752.3):
     
     Returns
     -------
-    R_alpha: float
+    R: float
 
     """
     N_phi = a/np.sqrt(1-e**2*np.sin(phi)**2) #radius of curvature in prime vertical eq 2
@@ -45,7 +44,6 @@ def R_G(phi, a = 6378137.000, b = 6356752.3):
 def R_alpha(phi,H,alpha, a = 6378137.000, b = 6356752.3):
     """
     Implements equations in "Acoustic Ray-Trace Equations for Seafloor Geodesy" by Chadwell and Sweeney
-    
     to obtain the radius of the spherical Earth model tangential along the particular azimuth
     being studied, that can then be used to do an Earth-flattening transform for seafloor geodesy.
     
@@ -57,7 +55,7 @@ def R_alpha(phi,H,alpha, a = 6378137.000, b = 6356752.3):
     
     Returns
     -------
-    R_alpha: float
+    R: float
 
     """
     e = eccentricity(a, b)
@@ -107,7 +105,7 @@ def SSP_transformed(c, h, R):
     """
     return np.multiply(c, np.divide(R, R-h))
 
-def eccentricity_r(reverse_flattening = 298.257222101)
+def eccentricity_r(reverse_flattening = 298.257222101):
     """
     Compute eccentricity based on code segment I found in GNATSS: https://github.com/seafloor-geodesy/gnatss/blob/3281937815640f07078283011f852261945e3f7c/src/gnatss/configs/solver.py#L29
     Parameters
