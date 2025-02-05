@@ -1,18 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Oct 14 11:18:51 2024
+Created on Fri Jan 24 13:57:56 2025
 
 @author: YXAVION
-
-Still building, incomplete
 """
 
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import math
+import random
 import pyproj
 import scipy
+from scipy.optimize import fsolve
+from scipy.spatial.distance import euclidean
 import arlpy.uwapm as pm
 import os
 import shutil
@@ -29,8 +30,7 @@ current_dir = os.path.dirname(__file__)
 # Set the working directory to the current script's directory
 os.chdir(current_dir)
 
-#%% defining functions lat lon to xyz and vincenty forward equation for WGS84
-    # points would be moving in a clockwise fashion
+#%% Defining geodetic functions, lat lon to xyz and vincenty forward equation for WGS84
 
 def geodetic_to_cartesian(lat, lon, alt):
     # Define the coordinate systems
@@ -225,7 +225,6 @@ def twt_calc(seafloor_depth, soundspeed, horizontal_dist, trans_depth):
     
     return arrival_time
 
-
 #%% functions to set shapes up with time
 
 def shape_time(shapes, rads, glider_speed, time_per_ping, num_rot = 5):
@@ -265,9 +264,8 @@ def shape_time(shapes, rads, glider_speed, time_per_ping, num_rot = 5):
             # archemiedian spiral
             # default will be 5 rotations, ie 10pi
             
-            num_rot = 5
             theta = num_rot*2*np.pi
-            a = rads / theta
+            a = np.divide(rads, theta)
             shape_length = 0.5 * a *(theta* np.sqrt(1 + np.square(theta)) + np.arcsinh(theta))
             
         if str.lower(shape) == 'figure 8':
@@ -282,7 +280,7 @@ def shape_time(shapes, rads, glider_speed, time_per_ping, num_rot = 5):
         
         obs_num = np.round(shape_length / (glider_speed*time_per_ping))
         time_taken = shape_length / (glider_speed)
-        shape_arr = [shape] * len(rads)
+        shape_arr = [shape] * np.size(rads)
         
         # Append the data together
         temp_df = pd.DataFrame(data = [shape_arr, rads, obs_num, time_taken]).T
@@ -292,8 +290,10 @@ def shape_time(shapes, rads, glider_speed, time_per_ping, num_rot = 5):
     return df
 
 #%% Shape create function 
-# create a shape using equations, load in library needed first
+# create a shape using equations
+# the points returned are the positions where the glider pings 
 # function for shapes around origin / array center
+
 def shape_create(shape, rad, num_pts, num_rot = 5):
     '''
     Will return a numpy array of the xyz in cartesian, relative to the (0,0,0) of the all the points where the pings are sent out
@@ -308,12 +308,6 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     rad is the radius of the shape that you want to make, usually set to the radius of the transponder array
     num_pts is the number of observation points that you want in the shape
     '''
-    import matplotlib.pyplot as plt
-    import numpy as np
-    import math
-    import scipy
-    import random
-    
     # circle 
     
     if str.lower(shape) == 'circle':
@@ -377,16 +371,12 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
         #x(θ) = (a + bθ) cos θ,
         #y(θ) = (a + bθ) sin θ
         # a = 0 as we start from 0
-        b =  rad / (num_rot*2*np.pi)
+        theta_max = num_rot*2*np.pi
+        b =  rad / theta_max
   
         # find the arc length so that we can find a spacing to use for equal spacing
-        # define the integral first
-        def f(x):
-            return np.sqrt(((b*np.cos(x) - (b*x)*np.sin(x))**2) + (b*np.sin(x) + (b*x)*np.cos(x))**2)
-  
-        theta_low = 0
-        theta_high = num_rot*2*np.pi
-        arc_len, err = scipy.integrate.quad(f, theta_low, theta_high)
+
+        arc_len = 0.5 * b *(theta_max* np.sqrt(1 + np.square(theta_max)) + np.arcsinh(theta_max))
   
         arc_intervals = np.linspace(0, arc_len, num = num_pts)
         thetas = np.sqrt(2 * arc_intervals / b)
@@ -404,10 +394,14 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     
     if str.lower(shape) == 'figure 8':
     # Figure , Eight Curve (Lemniscate of Bernoulli)
-        # Lemniscate of Bernoulli
+        # Lemniscate of Bernoulli, t is theta
 
         t = np.linspace(np.pi/2, 2.5*np.pi, num = num_pts)
-
+        
+        # find the arc length so that we can find a spacing to use for equal spacing
+        arc_len = 5.2441151086 * rad
+        arc_intervals = np.linspace(0, arc_len, num = num_pts)
+        
         x = rad * np.cos(t) / (np.sin(t)**2 + 1)
         y = rad * np.cos(t) * np.sin(t) / (np.sin(t)**2 + 1)
 
@@ -439,7 +433,7 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
     if str.lower(shape) == 'clover':
         # 2 figure Eight Curve (Lemniscate of Bernoulli) perpendicular to each other. 
 
-            t = np.linspace(0, 2*np.pi, num = int(num_pts/2))
+            t = np.linspace(np.pi/2, 2.5*np.pi, num = num_pts)
 
             x = rad * np.cos(t) / (np.sin(t)**2 + 1)
             y = rad * np.cos(t) * np.sin(t) / (np.sin(t)**2 + 1)
@@ -456,11 +450,15 @@ def shape_create(shape, rad, num_pts, num_rot = 5):
             plt.scatter(wg_pos[:, 0], wg_pos[:, 1])
 
     # Final output
-    return wg_pos
+    try:
+        return wg_pos, thetas
+    except:
+        return wg_pos
+
 
 #%% sound speed profile
 
-sv_file = pd.read_csv('./data/sound_vel.txt', sep=r'\s+', header = None)
+sv_file = pd.read_csv('./data/sound_vel.txt', sep='\s+', header = None)
 
 # convert soundspeed profile for bellhop to use
 sv_file[0] = sv_file[0].abs()
@@ -469,264 +467,253 @@ sv0_line = scipy.interpolate.interp1d(sv_file[0], sv_file[1], fill_value = "extr
 sv0 = sv0_line(0)
 sv0_df = pd.DataFrame(np.array([0, sv0])).transpose()
 
-# sound velocity profile for bellhop to use
 sv = pd.concat([sv0_df, sv_file])
 sv = sv.values.tolist()
 
-# save sound velocity as a .csv for garpos
-sv_df = pd.DataFrame(sv, columns=['depth', 'speed'])
-sv_df.to_csv('./data/sv.csv', index=False)
-
-
-#%% Parameters set for the different models
-
-# radius = [100, 300, 500, 1000, 1500, 1800, 2000, 2500, 3000, 4000]
-#shapes = ['circle', 'square', 'figure 8', 'spiral', 'random', 'clover']
-
-test_rads = np.array([500]) # test radius
-test_shapes = ['circle'] # test shapes
-glider_speed = 0.1 # in m/s
-time_btw_pings = 30 # time between the pings in sec
-sound_model = 'harmonic mean' # bellhop or harmonic mean
-
-# number of times to loop the shapes to get an average of the residuals
-nrun_per_shape = 3 # how many times to run that shape
-
-# Find all the number of observation points for all the different size of the shapes
-shapes_obs = shape_time(test_shapes, test_rads, glider_speed, time_btw_pings)
-# get a dataframe with shape, radius, number of observations, time taken in sec for survey
-
 #%% Parameters that are set for all models
-'''Data needs to be the same as the initcfg.ini file'''
-# This data can be hardcoded in to speed up if wanted
+    # use the data that we have gotten from the fortran benchmark for transponders positions
+    # mainly used for plotting instead of calculation
+    
+trans1_depth = 1832.8220
+trans2_depth = 1829.6450
+trans3_depth = 1830.7600
 
-# use the data that we have gotten from the gnatss fortran benchmark for transponders positions to test garpos
-# have to convert to ENU based on an arbituary point for it to run in garpos
+trans_latlong = pd.DataFrame(np.array([[44.832681360,-125.099794900], # 1.1
+                                       [44.817929650,-125.126649450], #1.2
+                                       [44.842325200,-125.134820280]]), #1.3
+                             columns=['lat', 'lon'])
 
-# lat, long and height(m) of all the transponders
-trans_pos = pd.DataFrame(np.array([[44.832681360 ,-125.099794900, -1832.8220], # 1.1
-                                       [44.817929650, -125.126649450, -1829.6450], #1.2
-                                       [44.842325200, -125.134820280, -1830.7600]]), #1.3
-                             columns=['lat', 'long', 'height'])
-# transponder 1.1, 1.2, 1.3 has delays, 0.2s, 0.32s and 0.44s respectively
+center_depth = np.mean([trans1_depth, trans2_depth, trans3_depth])
 
-# array center position in lat long and height
-arr_center_pos = trans_pos.mean()
 
-# aribituary point set to somewhere above array center in lat long and height
-arb_pt = np.array([44.8309, -125.1204, 20])
+# center of the array lat long
+arr_center = np.array([44.8319, -125.1204])
 
-# convert to ENU using pymap3d
-# defualt ellipsoid is wgs84
-# first series will be E then N then U
-trans_pos_ENU = pymap3d.geodetic2enu(trans_pos['lat'], trans_pos['long'], trans_pos['height'], arb_pt[0], arb_pt[1], arb_pt[2])
-arr_center_ENU = pymap3d.geodetic2enu(arr_center_pos['lat'], arr_center_pos['long'], arr_center_pos['height'], arb_pt[0], arb_pt[1], arb_pt[2])
+# transponder positions in xyz
+# transponder 1,2,3 has delays, 0.2s, 0.32s and 0.44s respectively
+trans1_x, trans1_y, trans1_z = geodetic_to_cartesian(lat = trans_latlong['lat'][0], 
+                                                     lon = trans_latlong['lon'][0],
+                                                     alt = -trans1_depth)
 
-# convert trans_pos_ENU to a pandas dataframe
-transponder_pos_ENU = pd.DataFrame({'E': trans_pos_ENU[0], 'N': trans_pos_ENU[1], 'U': trans_pos_ENU[2]})
+trans2_x, trans2_y, trans2_z = geodetic_to_cartesian(lat = trans_latlong['lat'][1], 
+                                                     lon = trans_latlong['lon'][1], 
+                                                     alt = -trans2_depth)
 
-#%% Find wave glider ping locations in ENU
+trans3_x, trans3_y, trans3_z = geodetic_to_cartesian(lat = trans_latlong['lat'][2], 
+                                                     lon = trans_latlong['lon'][2],
+                                                     alt = -trans3_depth)
+
+trans1 = np.array([trans1_x, trans1_y, trans1_z])
+trans2 = np.array([trans2_x, trans2_y, trans2_z])
+trans3 = np.array([trans3_x, trans3_y, trans3_z])
+
+#%% Test codes for spiral
+
+def find_theta_from_arc_length(s, b, theta_guess, tolerance=1e-6):
+    """
+    Finds the angle theta corresponding to a given arc length.
+    
+    Args:
+      s: Arc length.
+      b: Constant in the spiral equation (r = a + b*theta), a = 0.
+      tolerance: Tolerance for numerical root finding.
+      theta_guess is the initial thetas of glider position
+    
+    Returns:
+      Angle theta.
+    """
+    def t_arc_func(theta):
+        return (0.5 * b *(theta* np.sqrt(1 + np.square(theta)) + np.arcsinh(theta))) - s
+
+    theta, _ = fsolve(t_arc_func, theta_guess, xtol=tolerance)
+    return theta
+
+# twt
+def iterate_for_twt(wg_i, trans_pos, delay, glider_speed, sv_mean):
+    if wg_i is None:
+        raise ValueError("wg_i is None. Check the output of shape_time.")
+    if trans_pos is None:
+        raise ValueError("trans_pos is None. Ensure transponder positions are initialized.")
+    if sv_mean is None or sv_mean <= 0:
+        raise ValueError("sv_mean is invalid. Ensure the speed of sound is correctly set.") 
+    
+    owt_i = math.dist(wg_i, trans_pos)/sv_mean #initial owt, from wg to transponder
+    owt_guess = owt_i ##initial owt guess is the same as owt_i
+    #print("owt_i", owt_i)
+    ## Some initialization for bookeeping etc
+    #err_list = []; wg_i_list=[]; wg_guess_list = []
+    err = 1000; i=0 #err is arbitrarily high so that the while statement will be recognized, i for keeping track of iterations
+    
+    ## And iterate until the error threshold is surpassed for each point for wg_i (wg ping positions)
+    for wg_i, idx in enumerate(wg_i):
+        while err >= 1e-6:
+            ## guess waveglider position given initial one way travel time, delay, and guessed return one way travel time
+            wg_guess = 
+    
+            if wg_guess is None:
+                print("shape_time returned None for wg_guess. Exiting loop.")
+                break
+            ## Some bookeeping to keep track of things, some commented out unless errors occur
+            #wg_i_list.append(wg_i)# for bookeeping
+            #wg_guess_list.append(wg_guess)# for bookeeping
+            #err_list.append(err)# for bookeeping
+            
+            ## Just a snippet to flag if things arent converging
+            i+=1
+            if i >= 1000:
+                if i%1000 == 0:
+                    print('Error, iterating excessively. Iterations:',i)
+                    break
+            ## Go through, calculate an error (distance between wg position between two subsequent iterations)
+            err = math.dist(wg_i,wg_guess) #calculate difference between prior and subsequent guesses on waveglider position
+            #calculate estimated return owt, given the new wg pos
+            owt_guess = math.dist(wg_guess,trans_pos)/sv_mean 
+            
+            #update prior position for estimating convergence
+            wg_i = wg_guess
+            #print(err)
+    twt = owt_i + owt_guess #output twt as the sum of the initial owt and the latest owt guess
+    #print("owt_guess:", owt_guess)
+    print('Two-way travel time estimated in',i,'iterations')
+    return twt
+        
+
+def wg_pos_spiral(t, owt, wg_pos, trans_pos, speed, sv, rad, num_rot = 5):
+    """
+    Finds the angle theta corresponding to a given arc length.
+    Args:
+        t will be the set of thetas for the specific points of the ping positions
+        owt will be the initial one way travel time of one transponder to the glider, can be an array
+        Will only handle 1 transponder at a time
+        wg_pos will be the ping positions of the different pings
+        speed is the glider speed
+        sv will be the harmonic mean sound velocity
+        rad will the be radius currently being tested
+    Gives back the new wg_pos and the twt
+    """
+    
+    # Initial guess of twt and distances travelled
+    twt_ini = owt * 2
+    dist_ini = speed * twt_ini
+    
+    # initial test arc lengths
+    theta_max = num_rot*2*np.pi
+    b =  rad / theta_max
+    test_s = (0.5 * b *(t* np.sqrt(1 + np.square(t)) + np.arcsinh(t))) + dist_ini
+
+    # initial test thetas, positions and twt
+    test_t = find_theta_from_arc_length(test_s, b, t)
+    
+    test_x = np.multiply(b * test_t, np.cos(test_t))
+    test_y = np.multiply(b * test_t, np.sin(test_t))
+    test_z = np.zeros(np.size(test_x))
+    
+    test_trans_pos = np.transpose(np.array([test_x, test_y, test_z]))
+    
+    return_dist = np.array([euclidean(test_trans_pos, wg_pos) for test_trans_pos, wg_pos in zip(test_trans_pos, wg_pos)])
+    
+    test_twt = owt + (return_dist / sv)
+
+    twt = iterate_for_twt(wg_, trans_pos, delay, glider_speed, sv_mean)
+    
+    # new wave glider positions
+    new_x = np.multiply(b * new_t, np.cos(new_t))
+    new_y = np.multiply(b * new_t, np.sin(new_t))
+  
+    new_wg_pos = np.concatenate([new_x, new_y, np.zeros(np.size(new_x))])
+    new_wg_pos = np.reshape(wg_pos, [len(new_x), 3], order='F')
+    
+    return new_wg_pos
+    
+
+#%%
+
+speed = 1
+time = 20
+
+shapes_obs = shape_time(['spiral'], np.array([100]), speed, time)
+
 for i, shape_obs in shapes_obs.iterrows():
 
-    # get the antennae positions when the glider pings for a shape
-    wg_ping_pos = shape_create(shape_obs['Shape'], shape_obs['Radius'], int(shape_obs['Number of observations']))
-
-    # get the glider receiving positions
-    # change this a function later
-    '''# for now just put the same positions as the ping positions'''
+    wg_data = shape_create(shape_obs['Shape'], shape_obs['Radius'], int(shape_obs['Number of observations']))
     
-    wg_receive_pos1 = wg_ping_pos
-    wg_receive_pos2 = wg_ping_pos
-    wg_receive_pos3 = wg_ping_pos
-    
-    # combine the wave glider receive positions into one long array
-    wg_receive_pos = np.concatenate([wg_receive_pos1, wg_receive_pos2, wg_receive_pos3], axis=1).reshape((len(wg_receive_pos1)*3, 3))
-    
-    # roll, pitch, yaw (heading)for ping positions
-    # have to repeat array by 3 later using np.repeat as the 3 ping positions will the same
-    roll_ping = np.random.normal(0, 2, int(shape_obs['Number of observations']))
-    pitch_ping = np.random.normal(0, 2, int(shape_obs['Number of observations']))
-    yaw_ping = np.random.normal(0, 2, int(shape_obs['Number of observations']))
-    
-    # roll pitch yaw for receiving
-    roll_receive = np.random.normal(0, 2, int(shape_obs['Number of observations']*3))
-    pitch_receive = np.random.normal(0, 2, int(shape_obs['Number of observations']*3))
-    yaw_receive = np.random.normal(0, 2, int(shape_obs['Number of observations']*3))
-    
-    #%% From antennae to transducer position
-    ''''check https://www.frontiersin.org/journals/earth-science/articles/10.3389/feart.2020.597532/full for the conversion of antennae position to transducer position'''
-    
-    # ATD offset labelled M (from config file in fortran benchmark)
-    M = np.asmatrix('0.0053 ; 0 ; 0.92813')
-    
-    # This will be the transducer position when the glider pings
-    # temporary file that will be repeated by 3 times later after the loop
-    transducer_ping_pos1 = np.zeros([len(wg_ping_pos), 3])
-    
-    for j in range(0, len(roll_ping)): 
+    if len(wg_data) == 2:
         
-        # rotation matrix should be R = R4 * R3 * R2 * R1, matrix multiplication
-        # this will be for the ping positions
-        R4 = np.array(np.asmatrix('0 1 0; 1 0 0; 0 0 -1')) # final rotation
-        R3 = np.array([[np.cos(np.radians(yaw_ping[j])), -np.sin(np.radians(yaw_ping[j])),0],
-                       [np.sin(np.radians(yaw_ping[j])), np.cos(np.radians(yaw_ping[j])),0],
-                       [0, 0, 1]]) # yaw / heading rotation
+        wg_pos = wg_data[0]
+        thetas = wg_data[1]
+    else:
+        wg_pos = wg_data
         
-        R2 = np.array([[np.cos(np.radians(pitch_ping[j])),0, np.sin(np.radians(pitch_ping[j]))], 
-                       [0, 1, 0],
-                       [-np.sin(np.radians(pitch_ping[j])),0, np.cos(np.radians(pitch_ping[j]))]]) # pitch rotation
-        
-        R1 = np.array([[1, 0, 0], 
-                       [0, np.cos(np.radians(roll_ping[j])), -np.sin(np.radians(roll_ping[j]))], 
-                       [0, np.sin(np.radians(roll_ping[j])), np.cos(np.radians(roll_ping[j]))]])
-        
-        R = R4 @ R3 @ R2 @ R1 # matrix multiplication for final rotation matrix
-        
-        # This will be the offset of the different ENU data for the positions
-        RM = R @ M 
-        
-        ##### This has to be repeated 3 times when making the data input file
-        transducer_ping_pos1[j,] = np.transpose(np.transpose(np.asmatrix(wg_ping_pos[j,])) + RM)
-        
-    # repeat this 3 times to make the sending ping all the same for the 3 transponders
-    transducer_ping_pos = np.repeat(transducer_ping_pos1, 3, axis=0)
     
-    # This will be the transducer position for when the glider receives back the signal
-    transducer_receive_pos = np.zeros([len(wg_receive_pos), 3])
-        
-    for j in range(0, len(roll_receive)):
-        
-        # rotation matrix should be R = R4 * R3 * R2 * R1, matrix multiplication
-        # this will be for the ping positions
-        R4 = np.array(np.asmatrix('0 1 0; 1 0 0; 0 0 -1')) # final rotation
-        R3 = np.array([[np.cos(np.radians(yaw_receive[j])), -np.sin(np.radians(yaw_receive[j])),0],
-                       [np.sin(np.radians(yaw_receive[j])), np.cos(np.radians(yaw_receive[j])),0],
-                       [0, 0, 1]]) # yaw / heading rotation
-        
-        R2 = np.array([[np.cos(np.radians(pitch_receive[j])),0, np.sin(np.radians(pitch_receive[j]))], 
-                       [0, 1, 0],
-                       [-np.sin(np.radians(pitch_receive[j])),0, np.cos(np.radians(pitch_receive[j]))]]) # pitch rotation
-        
-        R1 = np.array([[1, 0, 0], 
-                       [0, np.cos(np.radians(roll_receive[j])), -np.sin(np.radians(roll_receive[j]))], 
-                       [0, np.sin(np.radians(roll_receive[j])), np.cos(np.radians(roll_receive[j]))]])
-        
-        R = R4 @ R3 @ R2 @ R1 # matrix multiplication for final rotation matrix
-        
-        # This will be the offset of the different ENU data for the different positions
-        RM = R @ M 
-        
-        transducer_receive_pos[j,] = np.transpose(np.transpose(np.asmatrix(wg_receive_pos[j,])) + RM)
-        
-    #%% Two way travel time calculations
 
-    # for now will just use harmonic mean of the sound speed
-    twt_send = np.zeros(np.size(yaw_receive))
-    twt_receive = np.zeros(np.size(yaw_receive))
-    
-    for i in range(0, int(len(transducer_ping_pos[:, 1])/3)): 
-        
-        if str.lower(sound_model) == 'harmonic mean':
-            
-            # distance in m for the ping positions between tranducer and transponder
-            wg_transponder_dist_ping1 = np.linalg.norm(transducer_ping_pos[i*3,:] - transponder_pos_ENU.iloc[0])
-            wg_transponder_dist_ping2 = np.linalg.norm(transducer_ping_pos[(i*3) + 1,:] - transponder_pos_ENU.iloc[1])
-            wg_transponder_dist_ping3 = np.linalg.norm(transducer_ping_pos[(i*3) + 2,:] - transponder_pos_ENU.iloc[2])
-            
-            # harmonic mean speed
-            sv_mean = scipy.stats.hmean(sv_file.iloc[:, 1], weights = np.repeat(4, sv_file.shape[0]))
-            
-            # get the travel time for the sending of the ping in sec
-            # add this to twt_receive later 
-            twt_send[i*3] = wg_transponder_dist_ping1 / sv_mean
-            twt_send[i*3 + 1] = wg_transponder_dist_ping2 / sv_mean
-            twt_send[i*3 + 2] = wg_transponder_dist_ping3 / sv_mean
-            
-            # distance in m for the receive positions between transducer and transponder
-            wg_transponder_dist_receive1 = np.linalg.norm(transducer_receive_pos[i*3,:] - transponder_pos_ENU.iloc[0])
-            wg_transponder_dist_receive2 = np.linalg.norm(transducer_receive_pos[(i*3) + 1,:] - transponder_pos_ENU.iloc[1])
-            wg_transponder_dist_receive3 = np.linalg.norm(transducer_receive_pos[(i*3) + 2,:] - transponder_pos_ENU.iloc[2])
-            
-            # travel time for receiving back the ping in sec
-            # garpos does not require delay timings in the twt
-            twt_receive[i*3] = wg_transponder_dist_receive1 / sv_mean #+ 0.2
-            twt_receive[i*3 + 1] = wg_transponder_dist_receive2 / sv_mean #+ 0.32
-            twt_receive[i*3 + 2] = wg_transponder_dist_receive3 / sv_mean #+ 0.44
-            
-    twt = twt_receive + twt_send
-            
-    #%% Create the datafile to run in garpos
-    
-    # seconds from 12am of the julian date set in the config file
-    start_time = 1000
-    
-    # sending times 
-    sending_time = start_time + np.arange(0, len(wg_ping_pos) * time_btw_pings, time_btw_pings)
-    ST = np.repeat(sending_time, 3) # used in the final
-    
-    # receiving times
-    RT = ST + twt
-    
-    # final array will be 
-    # SET	LN	MT	TT	ResiTT	TakeOff	gamma	flag	ST	ant_e0	ant_n0	ant_u0	head0	pitch0	roll0	RT	ant_e1	ant_n1	ant_u1	head1	pitch1	roll1
-    
-    # values that are mostly constant or does not really matter
-    Set = pd.DataFrame({'SET': ['S01'] * len(twt)})
-    LN = pd.DataFrame({'LN': ['L01'] * len(twt)})
-    MT = pd.DataFrame({'MT': ["M11", "M12", "M13"] * len(sending_time)})
-    TT = pd.DataFrame({'TT': twt})
-    ResiTT = pd.DataFrame({'ResiTT': np.zeros(len(twt))})
-    takeoff = pd.DataFrame({'TakeOff': np.zeros(len(twt))})
-    gamma = pd.DataFrame({'gamma': np.zeros(len(twt))})
-    flag = pd.DataFrame({'flag':  ['FALSE'] * len(twt)})
-    
-    # ST which is the pings (sending)
-    ant_e0 = pd.DataFrame({'ant_e0': np.repeat(wg_ping_pos[:,0],3)})
-    ant_n0 = pd.DataFrame({'ant_n0': np.repeat(wg_ping_pos[:,1],3)})
-    ant_u0 = pd.DataFrame({'ant_u0': np.repeat(wg_ping_pos[:,2],3)})
-    
-    head0 = pd.DataFrame({'head0': np.repeat(yaw_ping ,3)})
-    pitch0 = pd.DataFrame({'pitch0': np.repeat(pitch_ping ,3)})
-    roll0 = pd.DataFrame({'roll0': np.repeat(roll_ping ,3)})
-    
-    #RT which is the receiving of pings
-    ant_e1 = pd.DataFrame({'ant_e1': wg_receive_pos[:,0]})
-    ant_n1 = pd.DataFrame({'ant_n1': wg_receive_pos[:,1]})
-    ant_u1 = pd.DataFrame({'ant_u1': wg_receive_pos[:,2]})
-    
-    head1 = pd.DataFrame({'head1': yaw_receive})
-    pitch1 = pd.DataFrame({'pitch1': pitch_receive})
-    roll1 = pd.DataFrame({'roll1': roll_receive})
-    
-    #%% C'ombine all dataframes together
-    
-    final_data = pd.concat([Set, LN, MT, TT, ResiTT, takeoff, gamma, flag, pd.DataFrame({'ST': ST}), ant_e0, ant_n0, ant_u0, head0, pitch0, roll0, pd.DataFrame({'RT': RT}), ant_e1, ant_n1, ant_u1, head1, pitch1, roll1], axis=1)
-    
-    final_data.to_csv('./data/output.csv')
+#%% test codes for lemniscate
+# import numpy as np
 
-    
-    
-    
+# def lemniscate_arc_length(theta, a):
+#   """
+#   Calculates the arc length of a Lemniscate of Bernoulli.
+
+#   Args:
+#     theta: Angle in radians.
+#     a: Constant determining the size of the lemniscate.
+
+#   Returns:
+#     Arc length of the lemniscate.
+#   """
+#   r = np.sqrt(2 * a**2 * np.cos(2 * theta))
+#   dr_dtheta = -2 * a**2 * np.sin(2 * theta) / r
+#   return a * np.sqrt(2) * scipy.special.ellipkinc(theta, 1 / np.sqrt(2))
+
+# def find_theta_from_arc_length(s, a, tolerance=1e-6):
+#   """
+#   Finds the angle theta corresponding to a given arc length on the Lemniscate of Bernoulli.
+
+#   Args:
+#     s: Arc length.
+#     a: Constant determining the size of the lemniscate.
+#     tolerance: Tolerance for numerical root finding.
+
+#   Returns:
+#     Angle theta.
+#   """
+#   def func(theta):
+#     return lemniscate_arc_length(theta, a) - s
+
+#   theta_guess = s / (a * np.sqrt(2))  # Initial guess
+#   theta, _ = fsolve(func, theta_guess, xtol=tolerance)
+#   return theta
+
+# def equidistant_thetas_on_lemniscate(num_points, a, total_arc_length):
+#   """
+#   Calculates the thetas required for equidistant points along a Lemniscate of Bernoulli.
+
+#   Args:
+#     num_points: Number of equidistant points.
+#     a: Constant determining the size of the lemniscate.
+#     total_arc_length: Total arc length of the lemniscate segment.
+
+#   Returns:
+#     A list of thetas for the equidistant points.
+#   """
+#   arc_length_step = total_arc_length / (num_points - 1)
+#   thetas = []
+#   for i in range(num_points):
+#     arc_length = i * arc_length_step
+#     theta = find_theta_from_arc_length(arc_length, a)
+#     thetas.append(theta)
+#   return thetas
+
+# # Example usage
+# num_points = 5
+# a = 2  # Constant for the lemniscate
+# # Calculate total arc length (approximation for a full lemniscate)
+# total_arc_length = 4 * a * scipy.special.ellipkinc(np.pi / 4, 1 / np.sqrt(2)) 
+
+# equidistant_thetas = equidistant_thetas_on_lemniscate(num_points, a, total_arc_length)
+# print("Equidistant Thetas:", equidistant_thetas)  
+
     
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
